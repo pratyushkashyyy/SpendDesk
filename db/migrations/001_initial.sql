@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS google_connections (group_id INTEGER PRIMARY KEY CHECK (group_id IN (1,2)), email TEXT NOT NULL, token_cipher TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS oauth_states (state TEXT PRIMARY KEY, group_id INTEGER NOT NULL, expires_at TIMESTAMPTZ NOT NULL);
+CREATE TABLE IF NOT EXISTS stores (id UUID PRIMARY KEY, name TEXT NOT NULL, domain TEXT NOT NULL UNIQUE, cid TEXT NOT NULL UNIQUE, group_id INTEGER NOT NULL CHECK (group_id IN (1,2)), manager_cid TEXT NOT NULL DEFAULT '', shop_cipher TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS reports (store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE, source TEXT NOT NULL CHECK (source IN ('ads','shop')), report_date DATE NOT NULL, payload JSONB, error TEXT, checked_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (store_id,source,report_date));
+CREATE TABLE IF NOT EXISTS auth_attempts (key TEXT PRIMARY KEY, attempts INTEGER NOT NULL, resets_at TIMESTAMPTZ NOT NULL);

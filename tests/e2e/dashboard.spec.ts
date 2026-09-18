@@ -1,0 +1,270 @@
+import { test, expect } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import postgres from "postgres";
+import { encrypt } from "../../lib/server/crypto";
+import { dateInZone } from "../../lib/reporting";
+const local = JSON.parse(readFileSync(".local/config.json", "utf8"));
+if (!process.env.TEST_DATABASE_URL?.endsWith("/storedesk_browser_test"))
+  throw new Error("Browser tests require their isolated database.");
+const sql = postgres(process.env.TEST_DATABASE_URL);
+const password = "local-browser-check-passphrase";
+test("local owner setup, persisted mapping, source reports, examples, and mobile navigation", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/login$/);
+  await page.goto("/setup#" + local.SETUP_TOKEN);
+  await page.getByLabel("Dashboard password").fill(password);
+  await page.getByRole("button", { name: "Create my workspace" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Store overview" }),
+  ).toBeVisible();
+  // Multiple existing identities, including a third account, drive every account picker.
+  for (const group of [1, 2, 3])
+    await sql`INSERT INTO google_connections(group_id,email,token_cipher) VALUES(${group},${`account${group}@example.test`},${encrypt({ refreshToken: "browser-fixture" })})`;
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Connections", exact: false })
+    .first()
+    .click();
+  await page.getByRole("button", { name: "Add store", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Store name").fill("Local QA Store");
+  await dialog.getByLabel("Google Ads CID").fill("123-456-7890");
+  await dialog.getByLabel("Shopify domain").fill("local-qa.myshopify.com");
+  await dialog.getByLabel("Assign Google account").click();
+  await page.getByRole("option", { name: "account3@example.test" }).click();
+  await dialog.getByRole("button", { name: "Save store" }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByText("Local QA Store", { exact: true })).toBeVisible();
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Connections", exact: false })
+    .first()
+    .click();
+  await expect(page.getByText("Local QA Store", { exact: true })).toBeVisible();
+  const [store] =
+    await sql`SELECT id,group_id FROM stores WHERE domain='local-qa.myshopify.com'`;
+  expect(store.group_id).toBe(3);
+  for (const offset of [-1, 0]) {
+    const date = dateInZone("Asia/Kolkata", offset);
+    const ads = {
+      spend: offset === 0 ? 200 : 500,
+      purchases: 2,
+      costPerPurchase: 250,
+      costNote: "Test fixture only",
+      currency: "INR",
+      timezone: "Asia/Kolkata",
+      date,
+      fetchedAt: new Date().toISOString(),
+      budgets: [
+        {
+          id: "shared",
+          name: "QA Shared",
+          amount: 1000,
+          shared: true,
+          period: "DAILY",
+          campaigns: ["QA Shopping", "QA Brand"],
+        },
+        {
+          id: "second",
+          name: "QA Search",
+          amount: 500,
+          shared: false,
+          period: "DAILY",
+          campaigns: ["QA Search"],
+        },
+      ],
+      campaigns: [
+        {
+          id: "1",
+          name: "QA Shopping",
+          status: "ENABLED",
+          spend: 500,
+          budgetId: "shared",
+        },
+      ],
+      raw: { test: true },
+    };
+    const shop = {
+      sales: offset === 0 ? 800 : 2000,
+      orders: 4,
+      currency: "INR",
+      timezone: "Asia/Kolkata",
+      date,
+      fetchedAt: new Date().toISOString(),
+      raw: { test: true },
+    };
+    for (const [source, payload] of [
+      ["ads", ads],
+      ["shop", shop],
+    ] as const)
+      await sql`INSERT INTO reports(store_id,source,report_date,payload) VALUES(${store.id},${source},${date},${sql.json(payload)}) ON CONFLICT(store_id,source,report_date) DO UPDATE SET payload=EXCLUDED.payload,error=NULL`;
+  }
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await page.reload();
+  await page.getByLabel("Filter by Google login").click();
+  await page.getByRole("option", { name: "account1@example.test" }).click();
+  await expect(
+    page.getByRole("heading", { name: "No matching stores" }),
+  ).toBeVisible();
+  await page.getByLabel("Filter by Google login").click();
+  await page.getByRole("option", { name: "account3@example.test" }).click();
+  await expect(
+    page.getByRole("heading", { name: "No matching stores" }),
+  ).not.toBeVisible();
+  await page.getByLabel("Filter by Google login").click();
+  await page.getByRole("option", { name: "All Google accounts" }).click();
+  await expect(page.getByText("₹500.00", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "Today", exact: true }).click();
+  await expect(page.getByText("₹200.00", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "Yesterday", exact: true }).click();
+  await page.getByRole("button", { name: "2 budgets" }).click();
+  const sheet = page.getByRole("dialog");
+  await expect(sheet.getByText("QA Shared", { exact: true })).toHaveCount(1);
+  await expect(sheet.getByText("Shared · shown once")).toBeVisible();
+  await expect(sheet.getByText("INR · Asia/Kolkata").first()).toBeVisible();
+  await sheet.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByLabel("Search stores or CIDs").fill("missing-store");
+  await expect(
+    page.getByRole("heading", { name: "No matching stores" }),
+  ).toBeVisible();
+  await page.getByLabel("Clear search").click();
+  await page.screenshot({ path: "outputs/local-desktop.png", fullPage: true });
+  await page
+    .getByRole("button", { name: "Connections", exact: false })
+    .first()
+    .click();
+  await page.getByText("Local QA Store", { exact: true }).click();
+  await dialog.getByLabel("Store name").fill("Local QA Renamed");
+  await dialog.getByRole("button", { name: "Save store" }).click();
+  await expect(
+    page.getByText("Local QA Renamed", { exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Connections", exact: false })
+    .first()
+    .click();
+  await expect(
+    page.getByText("Local QA Renamed", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Set up Google API" }).click();
+  await dialog
+    .getByLabel("OAuth client ID")
+    .fill("qa-client.apps.googleusercontent.com");
+  await dialog
+    .getByLabel("OAuth client secret")
+    .fill("qa-client-secret-for-local-test");
+  await dialog.getByRole("button", { name: "Save API settings" }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Connect Google", exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    page.getByRole("link", { name: "Reconnect", exact: true }),
+  ).toHaveCount(3);
+  const startNew = await page.request.get("/api/google/start", {
+    maxRedirects: 0,
+  });
+  expect(startNew.status()).toBe(307);
+  const redirect = new URL(startNew.headers()["location"]);
+  expect(redirect.hostname).toBe("accounts.google.com");
+  const [state] =
+    await sql`SELECT group_id FROM oauth_states WHERE state=${redirect.searchParams.get("state")!}`;
+  expect(state.group_id).toBeNull();
+  const reconnect = await page.request.get("/api/google/start?group=3", {
+    maxRedirects: 0,
+  });
+  expect(reconnect.status()).toBe(307);
+  expect(
+    (
+      await page.request.get("/api/google/start?group=999999", {
+        maxRedirects: 0,
+      })
+    ).status(),
+  ).toBe(404);
+  const [savedConfig] =
+    await sql`SELECT value FROM settings WHERE key='google_config'`;
+  expect(savedConfig.value).not.toContain("qa-client-secret");
+  const publicData = await (await page.request.get("/api/dashboard")).json();
+  expect(JSON.stringify(publicData)).not.toContain(
+    "qa-client-secret-for-local-test",
+  );
+  await sql`DELETE FROM settings WHERE key='google_config'`;
+  // Unauthorized and malformed input remain rejected; checks never use live provider credentials.
+  const denied = await page.request.post("/api/stores", {
+    headers: { Origin: "https://wrong-origin.example" },
+    data: {},
+  });
+  expect(denied.status()).toBe(403);
+  const duplicate = await page.request.post("/api/stores", {
+    headers: { Origin: "http://127.0.0.1:3100" },
+    data: {
+      name: "Duplicate",
+      domain: "local-qa.myshopify.com",
+      cid: "1234567890",
+      group: 3,
+    },
+  });
+  expect(duplicate.status()).toBe(409);
+  const unconnected = await page.request.post("/api/stores", {
+    headers: { Origin: "http://127.0.0.1:3100" },
+    data: {
+      name: "Unknown account",
+      domain: "unknown.myshopify.com",
+      cid: "9999999999",
+      group: 999,
+    },
+  });
+  expect(unconnected.status()).toBe(400);
+  const invalid = await page.request.get("/api/dashboard?date=2026-02-30");
+  expect(invalid.status()).toBe(400);
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: "outputs/local-mobile.png", fullPage: true });
+  await page.getByRole("button", { name: "Toggle Sidebar" }).click();
+  await page.getByRole("button", { name: "Setup guide", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("heading", { name: "Let’s connect your stores" }),
+  ).toBeVisible();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole("button", { name: "My dashboard Sign out" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await page.getByLabel("Dashboard password").fill(password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Store overview" }),
+  ).toBeVisible();
+  // Clean local QA fixture so the user's workspace starts empty.
+  await sql`DELETE FROM stores WHERE domain='local-qa.myshopify.com'`;
+  await page.reload();
+  await page.getByRole("button", { name: "Preview with example data" }).click();
+  await expect(page.getByText("You’re viewing example data")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "View Crafted Goods" }),
+  ).toBeVisible();
+  await page.getByLabel("Search stores or CIDs").fill("Oak");
+  await expect(
+    page.getByRole("button", { name: "View Oak & Linen" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "View Crafted Goods" }),
+  ).toHaveCount(0);
+  await page.getByLabel("Clear search").click();
+  await page.getByRole("button", { name: "Back to live data" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Your stores belong here" }),
+  ).toBeVisible();
+  expect(errors).toEqual([]);
+});
+test.afterAll(async () => {
+  await sql`DELETE FROM stores WHERE domain='local-qa.myshopify.com'`;
+  await sql`DELETE FROM settings WHERE key='owner_password'`;
+  await sql`DELETE FROM settings WHERE key='google_config'`;
+  await sql`DELETE FROM auth_attempts`;
+  await sql.end();
+});

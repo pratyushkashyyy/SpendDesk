@@ -1,0 +1,25 @@
+import { readFile } from "node:fs/promises";
+import { db } from "../lib/server/db";
+const sql = db();
+try {
+  await sql`CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT now())`;
+  await sql.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(734051)`;
+    for (const name of ["001_initial", "002_dynamic_google"]) {
+      const existing =
+        await tx`SELECT name FROM schema_migrations WHERE name=${name}`;
+      if (!existing.length) {
+        await tx.unsafe(
+          await readFile(
+            new URL(`../db/migrations/${name}.sql`, import.meta.url),
+            "utf8",
+          ),
+        );
+        await tx`INSERT INTO schema_migrations (name) VALUES (${name})`;
+      }
+    }
+  });
+  console.log("Database migrations complete.");
+} finally {
+  await sql.end();
+}
