@@ -1,4 +1,5 @@
-export type Period = "yesterday" | "today" | "custom";
+export type Period =
+  "today" | "yesterday" | "last7" | "last30" | "monthToDate" | "custom";
 export type Budget = {
   id: string;
   name: string;
@@ -13,6 +14,44 @@ export type Campaign = {
   status: string;
   spend: number | null;
   budgetId: string;
+};
+export type CatalogProduct = {
+  id: string;
+  title: string;
+  handle: string;
+  status: string;
+  image: string | null;
+  variants: { id: string; title: string; sku: string | null; price: string }[];
+};
+export type CampaignDetail = Campaign & {
+  channel: string;
+  clicks: number | null;
+  impressions: number | null;
+  conversions: number | null;
+  budget: number | null;
+  budgetPeriod: string;
+  sharedBudget: boolean;
+};
+export type ProductPerformance = {
+  itemId: string;
+  title: string;
+  campaignId: string;
+  spend: number | null;
+  clicks: number | null;
+  impressions: number | null;
+  conversions: number | null;
+};
+export type StoreProductsData = {
+  products: CatalogProduct[];
+  campaigns: CampaignDetail[];
+  performance: ProductPerformance[];
+  links: { productId: string; campaignId: string }[];
+  date: string;
+  currency: string;
+  timezone: string;
+  catalogError: string | null;
+  adsError: string | null;
+  fetchedAt: string;
 };
 export type AdsReport = {
   spend: number | null;

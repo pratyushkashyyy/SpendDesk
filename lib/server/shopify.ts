@@ -58,6 +58,7 @@ export async function fetchShop(
   store: { domain: string; shop_cipher: string | null },
   offset: number,
   customDate?: string,
+  endDate?: string,
 ): Promise<ShopReport> {
   if (!store.shop_cipher)
     throw new Error("Connect this Shopify store to fetch sales.");
@@ -71,8 +72,9 @@ export async function fetchShop(
     "query { shop { currencyCode ianaTimezone } }",
   );
   const date = customDate || dateInZone(metadata.shop.ianaTimezone, offset);
+  const lastDate = endDate || date;
   const data = await shopGraphql(store.domain, token, SHOP_QUERY, {
-    query: `FROM sales SHOW total_sales, orders SINCE ${date} UNTIL ${date}`,
+    query: `FROM sales SHOW total_sales, orders SINCE ${date} UNTIL ${lastDate}`,
   });
   const report = data.shopifyqlQuery;
   if (report.parseErrors?.length)
@@ -85,7 +87,7 @@ export async function fetchShop(
     orders: numberOrNull(row?.orders),
     currency: data.shop.currencyCode,
     timezone: data.shop.ianaTimezone,
-    date,
+    date: date === lastDate ? date : `${date} – ${lastDate}`,
     fetchedAt: new Date().toISOString(),
     raw: report.tableData,
   };

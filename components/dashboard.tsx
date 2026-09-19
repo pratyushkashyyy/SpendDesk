@@ -25,9 +25,9 @@ import {
   Globe,
   CheckCircle2,
   AlertCircle,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableHeader,
@@ -68,6 +68,8 @@ import {
   SidebarTrigger,
   SidebarInset,
 } from "@/components/ui/sidebar";
+import StoreProducts from "@/components/store-products";
+import DateRangeFilter from "@/components/date-range-filter";
 import { demoStores } from "@/lib/demo";
 import { dateInZone, formatMoney } from "@/lib/reporting";
 import type { DashboardData, Store, Period } from "@/lib/types";
@@ -114,7 +116,8 @@ function Time({ value }: { value?: string }) {
 export default function Dashboard() {
   const [view, setView] = useState("overview"),
     [period, setPeriod] = useState<Period>("yesterday"),
-    [custom, setCustom] = useState(""),
+    [from, setFrom] = useState(() => dateInZone("Asia/Kolkata", -1)),
+    [to, setTo] = useState(() => dateInZone("Asia/Kolkata", -1)),
     [search, setSearch] = useState(""),
     [group, setGroup] = useState("all"),
     [sort, setSort] = useState("name"),
@@ -125,32 +128,37 @@ export default function Dashboard() {
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [syncing, setSyncing] = useState(false),
+    [exporting, setExporting] = useState(false),
     [selected, setSelected] = useState<Store | null>(null),
     [edit, setEdit] = useState<Store | null>(null),
     [addOpen, setAddOpen] = useState(false),
     [apiOpen, setApiOpen] = useState(false);
   const requestSequence = useRef(0);
-  const load = useCallback(async () => {
-    const sequence = ++requestSequence.current;
-    try {
-      const res = await fetch(
-        `/api/dashboard?period=${period}${period === "custom" && custom ? `&date=${custom}` : ""}`,
-      );
-      if (res.status === 401) {
-        window.location.assign("/login");
-        return;
+  const load = useCallback(
+    async (requestedFrom = from, requestedTo = to) => {
+      const sequence = ++requestSequence.current;
+      try {
+        const res = await fetch(
+          `/api/dashboard?from=${requestedFrom}&to=${requestedTo}`,
+        );
+        if (res.status === 401) {
+          window.location.assign("/login");
+          return;
+        }
+        const body = await res.json();
+        if (sequence !== requestSequence.current) return;
+        if (!res.ok) throw new Error(body.error);
+        setData(body);
+        setError("");
+      } catch (e) {
+        if (sequence === requestSequence.current)
+          setError((e as Error).message);
+      } finally {
+        if (sequence === requestSequence.current) setLoading(false);
       }
-      const body = await res.json();
-      if (sequence !== requestSequence.current) return;
-      if (!res.ok) throw new Error(body.error);
-      setData(body);
-      setError("");
-    } catch (e) {
-      if (sequence === requestSequence.current) setError((e as Error).message);
-    } finally {
-      if (sequence === requestSequence.current) setLoading(false);
-    }
-  }, [period, custom]);
+    },
+    [from, to],
+  );
   useEffect(() => {
     load();
     const timer = setInterval(load, 30000);
@@ -162,9 +170,21 @@ export default function Dashboard() {
     const n = params.get("notice");
     if (n) setNotice(n.replaceAll("-", " "));
   }, []);
-  const stores = demo
-    ? demoStores(period === "today", period === "custom" ? custom : undefined)
-    : data.stores;
+  const stores = useMemo(
+    () =>
+      demo
+        ? demoStores(
+            to === dateInZone("Asia/Kolkata"),
+            from === to ? from : undefined,
+          )
+        : data.stores,
+    [demo, from, to, data.stores],
+  );
+  useEffect(() => {
+    setSelected((old) =>
+      old ? stores.find((s) => s.id === old.id) || null : null,
+    );
+  }, [stores]);
   const connections = demo
     ? [1, 2, 3].map((group) => ({
         group,
@@ -216,7 +236,7 @@ export default function Dashboard() {
   const activeCount = data.stores.filter(
     (s) => s.ads && s.shop && !s.adsError && !s.shopError && !stale(s),
   ).length;
-  async function refresh() {
+  async function refresh(nextFrom = from, nextTo = to) {
     if (demo) {
       setNotice(
         "Example data is a preview. Switch to live data to sync your accounts.",
@@ -228,26 +248,52 @@ export default function Dashboard() {
       const res = await fetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(period === "custom" ? { date: custom } : {}),
+        body: JSON.stringify({ from: nextFrom, to: nextTo }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error);
       setNotice(body.message);
-      await load();
+      await load(nextFrom, nextTo);
     } catch (e) {
       setNotice((e as Error).message);
     } finally {
       setSyncing(false);
     }
   }
+  async function exportReport() {
+    setExporting(true);
+    try {
+      const response = await fetch(`/api/export?from=${from}&to=${to}`);
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (!response.ok) {
+        const body = await response.json();
+        throw new Error(body.error);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `spenddesk-${from}-${to}.csv`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNotice(
+        `Exported all account data for ${from === to ? from : `${from} to ${to}`}.`,
+      );
+    } catch (error) {
+      setNotice((error as Error).message);
+    } finally {
+      setExporting(false);
+    }
+  }
   function add() {
     setEdit(null);
     setAddOpen(true);
   }
-  const displayDate =
-    period === "custom"
-      ? custom
-      : dateInZone("Asia/Kolkata", period === "today" ? 0 : -1);
   return (
     <SidebarProvider
       style={{ "--sidebar-width": "248px" } as React.CSSProperties}
@@ -401,7 +447,7 @@ export default function Dashboard() {
             <Button
               variant="outline"
               className="refresh-button"
-              onClick={refresh}
+              onClick={() => refresh()}
               disabled={
                 syncing || data.sync?.running || !data.stores.length || demo
               }
@@ -448,7 +494,7 @@ export default function Dashboard() {
             <div className="notice error" role="alert">
               <AlertCircle size={16} />
               {error}
-              <Button variant="ghost" onClick={load}>
+              <Button variant="ghost" onClick={() => load()}>
                 Retry
               </Button>
             </div>
@@ -528,7 +574,9 @@ export default function Dashboard() {
                     <p>Scheduled sync</p>
                     <strong className="text-stat">Automatic</strong>
                     <small>
-                      {demo ? "Example preview" : "Frequency fits your API allowance"}
+                      {demo
+                        ? "Example preview"
+                        : "Frequency fits your API allowance"}
                     </small>
                   </div>
                 </div>
@@ -544,23 +592,17 @@ export default function Dashboard() {
                     </h2>
                     <p>Source-reported orders and ad spend, side by side.</p>
                   </div>
-                  <Tabs
-                    value={period}
-                    onValueChange={(v) => {
-                      setPeriod(v as Period);
-                      if (v === "custom" && !custom)
-                        setCustom(dateInZone("Asia/Kolkata", -1));
+                  <DateRangeFilter
+                    period={period}
+                    from={from}
+                    to={to}
+                    onApply={(nextPeriod, nextFrom, nextTo) => {
+                      setPeriod(nextPeriod);
+                      setFrom(nextFrom);
+                      setTo(nextTo);
+                      if (!demo) void refresh(nextFrom, nextTo);
                     }}
-                  >
-                    <TabsList className="period-tabs">
-                      <TabsTrigger value="yesterday">Yesterday</TabsTrigger>
-                      <TabsTrigger value="today">Today</TabsTrigger>
-                      <TabsTrigger value="custom">
-                        <CalendarDays size={14} />
-                        Choose date
-                      </TabsTrigger>
-                    </TabsList>
-                  </Tabs>
+                  />
                 </div>
                 <div className="report-toolbar">
                   <div className="search-box">
@@ -603,31 +645,15 @@ export default function Dashboard() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <div className="date-caption">
-                    {period === "custom" ? (
-                      <input
-                        type="date"
-                        aria-label="Report date"
-                        value={custom}
-                        max={dateInZone("Asia/Kolkata")}
-                        onChange={(e) => setCustom(e.target.value)}
-                      />
-                    ) : (
-                      <>
-                        <CalendarDays size={14} />
-                        {new Date(
-                          `${displayDate}T12:00:00Z`,
-                        ).toLocaleDateString("en-IN", {
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                        })}
-                      </>
-                    )}
-                    {period === "today" && (
-                      <span className="live-label">Partial day</span>
-                    )}
-                  </div>
+
+                  <Button
+                    variant="outline"
+                    disabled={demo || exporting || !data.database}
+                    onClick={exportReport}
+                  >
+                    <Download size={14} />
+                    {exporting ? "Preparing…" : "Export report"}
+                  </Button>
                   <Button
                     variant="outline"
                     onClick={add}
@@ -705,7 +731,13 @@ export default function Dashboard() {
                               <small>
                                 <span
                                   className="login-dot"
-                                  style={{background: ["#8b7ef8", "#59b9a3", "#eba869"][s.group % 3]}}
+                                  style={{
+                                    background: [
+                                      "#8b7ef8",
+                                      "#59b9a3",
+                                      "#eba869",
+                                    ][s.group % 3],
+                                  }}
                                 />
                                 {s.cid.replace(
                                   /(\d{3})(\d{3})(\d{4})/,
@@ -1264,6 +1296,13 @@ export default function Dashboard() {
                       {e}
                     </p>
                   ))}
+                <StoreProducts
+                  key={`${selected.id}:${from}:${to}`}
+                  store={selected}
+                  demo={demo}
+                  from={from}
+                  to={to}
+                />
                 <h3>Current daily budgets</h3>
                 <p className="muted">
                   Fetched with the report. These may differ from the budget that
@@ -1293,18 +1332,6 @@ export default function Dashboard() {
                     Budgets appear after the first successful Google Ads sync.
                   </p>
                 )}
-                <h3>Campaigns · selected day</h3>
-                {selected.ads?.campaigns.map((c) => (
-                  <div className="budget-row" key={c.id}>
-                    <div>
-                      <strong>{c.name}</strong>
-                      <small>{c.status.toLowerCase()}</small>
-                    </div>
-                    <strong>
-                      {formatMoney(c.spend, selected.ads?.currency)}
-                    </strong>
-                  </div>
-                ))}
                 <h3>Source details</h3>
                 {[
                   { title: "Google Ads", r: selected.ads },

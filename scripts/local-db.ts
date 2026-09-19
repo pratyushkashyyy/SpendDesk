@@ -89,29 +89,8 @@ if (process.argv.includes("--app")) {
     ["node_modules/next/dist/bin/next", "dev", "--hostname", "127.0.0.1"],
     { stdio: "inherit" },
   );
-  let lastRefresh = Date.now();
-  let checking = false;
-  const refresh = async () => {
-    if (sync || checking) return;
-    checking = true;
-    // Each four-day Ads refresh uses about 20 search operations per store.
-    // Reserve headroom beneath Explorer's 2,880-operation daily allowance.
-    const schedulerClient = pg.getPgClient("storedesk", "127.0.0.1");
-    try {
-      await schedulerClient.connect();
-      const result = await schedulerClient.query(
-        "SELECT count(*)::int AS count FROM stores",
-      );
-      const minutes = refreshIntervalMinutes(result.rows[0].count);
-      if (Date.now() - lastRefresh < minutes * 60 * 1000) return;
-      lastRefresh = Date.now();
-    } catch {
-      console.error("Local scheduler could not check its refresh allowance.");
-      return;
-    } finally {
-      await schedulerClient.end();
-      checking = false;
-    }
+  const refresh = () => {
+    if (sync) return;
     sync = spawn(
       process.execPath,
       ["--env-file=.env.local", "--import", "tsx", "scripts/sync.ts"],
@@ -121,8 +100,8 @@ if (process.argv.includes("--app")) {
       sync = undefined;
     });
   };
-  timer = setInterval(refresh, 15 * 60 * 1000);
-  console.log("Local app and Explorer-aware sync scheduler started.");
+  timer = setInterval(refresh, refreshIntervalMinutes() * 60 * 1000);
+  console.log("Local app and hourly sync scheduler started.");
   app.on("exit", () => {
     void stop();
   });

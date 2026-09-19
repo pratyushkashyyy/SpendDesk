@@ -2,8 +2,7 @@ import { syncReports } from "../lib/server/sync";
 import { db, getSetting } from "../lib/server/db";
 import { refreshIntervalMinutes } from "../lib/schedule";
 try {
-  const [stores] = await db()`SELECT count(*)::int AS count FROM stores`;
-  const interval = refreshIntervalMinutes(stores.count);
+  const interval = refreshIntervalMinutes();
   const previous = JSON.parse((await getSetting("sync_status")) || "null");
   const elapsed = previous?.finishedAt
     ? Date.now() - Date.parse(previous.finishedAt)

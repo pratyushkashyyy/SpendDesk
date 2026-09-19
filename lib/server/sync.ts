@@ -11,7 +11,7 @@ export type SyncStatus = {
   date?: string;
   failed?: boolean;
 };
-export async function syncReports(customDate?: string) {
+export async function syncReports(customDate?: string, endDate?: string) {
   const connection = await db().reserve();
   let acquired = false;
   const status: SyncStatus = {
@@ -19,7 +19,10 @@ export async function syncReports(customDate?: string) {
     startedAt: new Date().toISOString(),
     synced: 0,
     errors: 0,
-    date: customDate,
+    date:
+      customDate && endDate && customDate !== endDate
+        ? `${customDate} – ${endDate}`
+        : customDate,
   };
   try {
     const [lock] =
@@ -55,15 +58,22 @@ export async function syncReports(customDate?: string) {
                     token as Awaited<ReturnType<typeof googleAccess>>,
                     offset,
                     customDate,
+                    endDate,
                   )
-                : await fetchShop(store as any, offset, customDate);
+                : await fetchShop(store as any, offset, customDate, endDate);
             reportDate = data.date;
-            await db()`INSERT INTO reports(store_id,source,report_date,payload,error) VALUES(${store.id},${source},${reportDate},${db().json(data as any)},NULL) ON CONFLICT(store_id,source,report_date) DO UPDATE SET payload=EXCLUDED.payload,error=NULL,checked_at=now()`;
+            if (customDate && endDate && customDate !== endDate)
+              await db()`INSERT INTO report_ranges(store_id,source,start_date,end_date,payload,error) VALUES(${store.id},${source},${customDate},${endDate},${db().json(data as any)},NULL) ON CONFLICT(store_id,source,start_date,end_date) DO UPDATE SET payload=EXCLUDED.payload,error=NULL,checked_at=now()`;
+            else
+              await db()`INSERT INTO reports(store_id,source,report_date,payload,error) VALUES(${store.id},${source},${reportDate},${db().json(data as any)},NULL) ON CONFLICT(store_id,source,report_date) DO UPDATE SET payload=EXCLUDED.payload,error=NULL,checked_at=now()`;
             status.synced++;
           } catch (e) {
             const message =
               e instanceof Error ? e.message : "Sync failed. Try again.";
-            await db()`INSERT INTO reports(store_id,source,report_date,error) VALUES(${store.id},${source},${reportDate},${message}) ON CONFLICT(store_id,source,report_date) DO UPDATE SET error=EXCLUDED.error,checked_at=now()`;
+            if (customDate && endDate && customDate !== endDate)
+              await db()`INSERT INTO report_ranges(store_id,source,start_date,end_date,error) VALUES(${store.id},${source},${customDate},${endDate},${message}) ON CONFLICT(store_id,source,start_date,end_date) DO UPDATE SET error=EXCLUDED.error,checked_at=now()`;
+            else
+              await db()`INSERT INTO reports(store_id,source,report_date,error) VALUES(${store.id},${source},${reportDate},${message}) ON CONFLICT(store_id,source,report_date) DO UPDATE SET error=EXCLUDED.error,checked_at=now()`;
             status.errors++;
           }
           await putSetting("sync_status", JSON.stringify(status));

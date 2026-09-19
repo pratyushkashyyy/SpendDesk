@@ -103,6 +103,64 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
     ] as const)
       await sql`INSERT INTO reports(store_id,source,report_date,payload) VALUES(${store.id},${source},${date},${sql.json(payload)}) ON CONFLICT(store_id,source,report_date) DO UPDATE SET payload=EXCLUDED.payload,error=NULL`;
   }
+  const yesterday = dateInZone("Asia/Kolkata", -1);
+  const productId = "gid://shopify/Product/9001";
+  await sql`INSERT INTO store_product_snapshots(store_id,start_date,end_date,payload) VALUES(${store.id},${yesterday},${yesterday},${sql.json(
+    {
+      products: [
+        {
+          id: productId,
+          title: "QA Product",
+          handle: "qa-product",
+          status: "ACTIVE",
+          image: null,
+          variants: [
+            {
+              id: "gid://shopify/ProductVariant/9002",
+              title: "Default Title",
+              sku: "QA-SKU",
+              price: "499.00",
+            },
+          ],
+        },
+      ],
+      campaigns: [
+        {
+          id: "1",
+          name: "QA Shopping",
+          status: "ENABLED",
+          channel: "SHOPPING",
+          budgetId: "shared",
+          budget: 1000,
+          budgetPeriod: "DAILY",
+          sharedBudget: true,
+          spend: 500,
+          clicks: 12,
+          impressions: 300,
+          conversions: 2,
+        },
+      ],
+      performance: [
+        {
+          itemId: "shopify_IN_9001_9002",
+          title: "QA Product",
+          campaignId: "1",
+          spend: 500,
+          clicks: 12,
+          impressions: 300,
+          conversions: 2,
+        },
+      ],
+      links: [],
+      date: yesterday,
+      currency: "INR",
+      timezone: "Asia/Kolkata",
+      catalogError: null,
+      adsError: null,
+      fetchedAt: new Date().toISOString(),
+    },
+  )}) ON CONFLICT(store_id,start_date,end_date) DO UPDATE SET payload=EXCLUDED.payload,checked_at=now()`;
+  await sql`INSERT INTO product_campaign_links(store_id,product_id,campaign_id) VALUES(${store.id},${productId},'1') ON CONFLICT DO NOTHING`;
   await page.getByRole("button", { name: "Overview", exact: true }).click();
   await page.reload();
   await page.getByLabel("Filter by Google login").click();
@@ -118,9 +176,49 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
   await page.getByLabel("Filter by Google login").click();
   await page.getByRole("option", { name: "All Google accounts" }).click();
   await expect(page.getByText("₹500.00", { exact: true })).toBeVisible();
-  await page.getByRole("tab", { name: "Today", exact: true }).click();
+  await page.getByRole("button", { name: "Choose report date range" }).click();
+  await expect(page.locator(".date-preset-list")).toBeVisible();
+  await expect(page.locator(".rdp-month")).toHaveCount(2);
+  await page.screenshot({
+    path: "outputs/date-range-filter.png",
+    fullPage: true,
+  });
+  await page
+    .locator(".date-preset-list")
+    .getByRole("button", { name: "Today", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(page.getByText("₹200.00", { exact: true })).toBeVisible();
-  await page.getByRole("tab", { name: "Yesterday", exact: true }).click();
+  await page.getByRole("button", { name: "Choose report date range" }).click();
+  await page
+    .locator(".date-preset-list")
+    .getByRole("button", { name: "Yesterday", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  const exported = await page.request.get(
+    `/api/export?from=${yesterday}&to=${yesterday}`,
+  );
+  expect(exported.status()).toBe(200);
+  expect(exported.headers()["content-type"]).toContain("text/csv");
+  const exportedText = await exported.text();
+  for (const value of [
+    "Google account",
+    "Store summary",
+    "Budget",
+    "Campaign",
+    "Shopify product",
+    "Product ad activity",
+    "Manual product campaign link",
+    "QA-SKU",
+    yesterday,
+  ])
+    expect(exportedText).toContain(value);
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export report" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe(
+    `spenddesk-${yesterday}-${yesterday}.csv`,
+  );
   await page.getByRole("button", { name: "2 budgets" }).click();
   const sheet = page.getByRole("dialog");
   await expect(sheet.getByText("QA Shared", { exact: true })).toHaveCount(1);
@@ -247,6 +345,23 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
   await expect(
     page.getByRole("button", { name: "View Crafted Goods" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "View Crafted Goods" }).click();
+  const exampleSheet = page.getByRole("dialog");
+  await expect(
+    exampleSheet.getByRole("heading", { name: "Products & campaigns" }),
+  ).toBeVisible();
+  await expect(exampleSheet.getByText("Everyday essentials")).toBeVisible();
+  await exampleSheet.getByText("Everyday essentials").click();
+  await expect(
+    exampleSheet.getByText("Reported product link").first(),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "outputs/product-workspace.png",
+    fullPage: true,
+  });
+  await exampleSheet
+    .getByRole("button", { name: "Close", exact: true })
+    .click();
   await page.getByLabel("Search stores or CIDs").fill("Oak");
   await expect(
     page.getByRole("button", { name: "View Oak & Linen" }),

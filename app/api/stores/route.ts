@@ -62,8 +62,12 @@ export async function POST(request: Request) {
         );
       await db().begin(async (tx) => {
         await tx`UPDATE stores SET name=${input.name},domain=${domain},cid=${input.cid},group_id=${input.group},manager_cid=${input.managerCid},shop_cipher=COALESCE(${cipher},shop_cipher) WHERE id=${input.id!}`;
-        if (old[0].domain !== domain || old[0].cid !== input.cid)
+        if (old[0].domain !== domain || old[0].cid !== input.cid) {
           await tx`DELETE FROM reports WHERE store_id=${input.id!}`;
+          await tx`DELETE FROM report_ranges WHERE store_id=${input.id!}`;
+          await tx`DELETE FROM store_product_snapshots WHERE store_id=${input.id!}`;
+          await tx`DELETE FROM product_campaign_links WHERE store_id=${input.id!}`;
+        }
       });
     } else {
       await db().begin(async (tx) => {

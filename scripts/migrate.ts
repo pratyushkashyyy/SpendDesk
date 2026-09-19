@@ -5,7 +5,12 @@ try {
   await sql`CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT now())`;
   await sql.begin(async (tx) => {
     await tx`SELECT pg_advisory_xact_lock(734051)`;
-    for (const name of ["001_initial", "002_dynamic_google"]) {
+    for (const name of [
+      "001_initial",
+      "002_dynamic_google",
+      "003_store_products",
+      "004_date_ranges",
+    ]) {
       const existing =
         await tx`SELECT name FROM schema_migrations WHERE name=${name}`;
       if (!existing.length) {

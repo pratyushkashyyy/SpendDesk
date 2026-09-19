@@ -35,7 +35,19 @@ await sql.unsafe(
     "utf8",
   ),
 );
-await sql`TRUNCATE reports,stores,google_connections,settings,oauth_states,auth_attempts`;
+await sql.unsafe(
+  await readFile(
+    new URL("../../db/migrations/003_store_products.sql", import.meta.url),
+    "utf8",
+  ),
+);
+await sql.unsafe(
+  await readFile(
+    new URL("../../db/migrations/004_date_ranges.sql", import.meta.url),
+    "utf8",
+  ),
+);
+await sql`TRUNCATE product_campaign_links,store_product_snapshots,report_ranges,reports,stores,google_connections,settings,oauth_states,auth_attempts`;
 
 test("real PostgreSQL sync stores provider values, preserves snapshots on failures, and prevents overlapping jobs", async () => {
   const id = randomUUID(),
@@ -171,6 +183,18 @@ test("real PostgreSQL sync stores provider values, preserves snapshots on failur
     const shop = rows.find((r) => r.source === "shop");
     assert.equal(shop!.payload.sales, 8765.43);
     assert.equal(shop!.payload.orders, 9);
+    const rangeStart = "2026-09-10",
+      rangeEnd = "2026-09-17";
+    const ranged = await syncReports(rangeStart, rangeEnd);
+    assert.equal(ranged.synced, 2);
+    assert.equal(ranged.errors, 0);
+    const rangeRows =
+      await sql`SELECT source,start_date::text,end_date::text,payload,error FROM report_ranges WHERE store_id=${id} AND start_date=${rangeStart}::date AND end_date=${rangeEnd}::date`;
+    assert.equal(rangeRows.length, 2);
+    assert.ok(rangeRows.every((row) => row.start_date === rangeStart));
+    assert.ok(rangeRows.every((row) => row.end_date === rangeEnd));
+    assert.ok(rangeRows.every((row) => row.payload.date.includes(rangeStart)));
+    assert.ok(rangeRows.every((row) => row.payload.date.includes(rangeEnd)));
     const lock = await sql.reserve();
     await lock`SELECT pg_advisory_lock(734052)`;
     assert.equal((await syncReports()).busy, true);
@@ -193,7 +217,7 @@ test("real PostgreSQL sync stores provider values, preserves snapshots on failur
     assert.ok(!cipher.token_cipher.includes("qa-refresh"));
   } finally {
     globalThis.fetch = original;
-    await sql`TRUNCATE reports,stores,google_connections,settings,oauth_states,auth_attempts`;
+    await sql`TRUNCATE product_campaign_links,store_product_snapshots,report_ranges,reports,stores,google_connections,settings,oauth_states,auth_attempts`;
     await sql.end();
   }
 });

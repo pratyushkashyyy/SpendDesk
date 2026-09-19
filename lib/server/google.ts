@@ -65,6 +65,7 @@ export async function fetchAds(
   auth: Awaited<ReturnType<typeof googleAccess>>,
   offset: number,
   customDate?: string,
+  endDate?: string,
 ): Promise<AdsReport> {
   const query = (q: string) => adsQuery(store.cid, store.manager_cid, auth, q);
   const [metadata] = await query(
@@ -75,15 +76,20 @@ export async function fetchAds(
   const currency = metadata.customer.currencyCode,
     timezone = metadata.customer.timeZone;
   const date = customDate || dateInZone(timezone, offset);
+  const lastDate = endDate || date;
+  const dateFilter =
+    date === lastDate
+      ? `segments.date = '${date}'`
+      : `segments.date BETWEEN '${date}' AND '${lastDate}'`;
   const [totals, categories, campaigns] = await Promise.all([
     query(
-      `SELECT metrics.cost_micros, metrics.cost_per_conversion, metrics.conversions FROM customer WHERE segments.date = '${date}'`,
+      `SELECT metrics.cost_micros, metrics.cost_per_conversion, metrics.conversions FROM customer WHERE ${dateFilter}`,
     ),
     query(
-      `SELECT segments.conversion_action_category, metrics.conversions FROM customer WHERE segments.date = '${date}'`,
+      `SELECT segments.conversion_action_category, metrics.conversions FROM customer WHERE ${dateFilter}`,
     ),
     query(
-      `SELECT campaign.id, campaign.name, campaign.status, campaign_budget.id, campaign_budget.name, campaign_budget.amount_micros, campaign_budget.explicitly_shared, campaign_budget.period, metrics.cost_micros FROM campaign WHERE segments.date = '${date}'`,
+      `SELECT campaign.id, campaign.name, campaign.status, campaign_budget.id, campaign_budget.name, campaign_budget.amount_micros, campaign_budget.explicitly_shared, campaign_budget.period, metrics.cost_micros FROM campaign WHERE ${dateFilter}`,
     ),
   ]);
   // Budget-only query also includes active campaigns with zero delivery in the selected period.
@@ -131,7 +137,7 @@ export async function fetchAds(
         : "Unavailable as a purchase-only source metric. No cost per purchase is calculated.",
     currency,
     timezone,
-    date,
+    date: date === lastDate ? date : `${date} – ${lastDate}`,
     budgets: [...budgets.values()],
     campaigns: campaigns.map((r) => ({
       id: r.campaign.id,

@@ -12,11 +12,13 @@ SpendDesk is a self-hosted dashboard for a single owner managing multiple stores
 
 ## Features
 
-- **Daily overview:** yesterday by default, today, or a custom single date.
+- **Shopify-style date range:** Today, Yesterday, Last 7 days, Last 30 days, Month to date, or a custom range from a two-month calendar.
+- **Complete CSV export:** download all connected Google accounts, store summaries, budgets, campaigns, product-level ad activity, Shopify products, and saved campaign assignments for the selected dates.
 - **Dynamic Google connections:** add logins, filter by email, and reconnect without duplicating accounts or changing store assignments.
 - **Store mapping:** one Google Ads customer ID (CID) per Shopify store, with optional manager-account access.
 - **Google Ads reporting:** actual spend, purchase conversions, eligible source-reported cost per purchase, campaign details, and configured budgets.
 - **Shopify orders:** source-reported order counts alongside ad performance. Shopify sales are hidden from the interface.
+- **Product drill-down:** open a store to browse its Shopify products, reported product-level ad activity, campaign totals, and saved manual campaign assignments.
 - **Budget visibility:** distinguish daily and other budget periods, and show shared budgets once with their associated campaigns.
 - **Refresh and history:** manual and scheduled refreshes, source errors, and preserved last successful snapshots.
 - **Responsive workspace:** desktop overview, mobile navigation, search, store details, and connection management.
@@ -27,14 +29,14 @@ This repository contains application source and synthetic test/example data. Con
 
 ## Stack
 
-| Layer | Technology |
-| --- | --- |
-| Application | Next.js App Router, React, TypeScript |
-| Interface | Tailwind CSS, shadcn/Base UI, Lucide icons |
-| Database | PostgreSQL, SQL migrations, postgres.js |
-| Providers | Google Ads REST API and Shopify Admin GraphQL / ShopifyQL |
-| Tests | Node test runner with tsx; Playwright for browser checks |
-| Deployment | Docker, Railway web service, PostgreSQL, scheduled worker |
+| Layer       | Technology                                                |
+| ----------- | --------------------------------------------------------- |
+| Application | Next.js App Router, React, TypeScript                     |
+| Interface   | Tailwind CSS, shadcn/Base UI, Lucide icons                |
+| Database    | PostgreSQL, SQL migrations, postgres.js                   |
+| Providers   | Google Ads REST API and Shopify Admin GraphQL / ShopifyQL |
+| Tests       | Node test runner with tsx; Playwright for browser checks  |
+| Deployment  | Docker, Railway web service, PostgreSQL, scheduled worker |
 
 ```mermaid
 flowchart LR
@@ -112,32 +114,34 @@ The connection form supports:
 - **Admin API access token:** a separately authorized token for the store. This path does not automatically renew expiring tokens.
 - **Client ID and client secret:** for an installed app and store in the same Shopify organization, the backend obtains an access token using the client-credentials grant when fetching reports.
 
-ShopifyQL reporting requires `read_reports` and Level 2 protected customer data access. Confirm eligibility and app permissions for each installation; see [Shopify's reporting requirements](https://shopify.dev/docs/apps/build/shopifyql/graphql-admin-api). A Shopify Basic subscription alone does not establish API reporting access.
+ShopifyQL reporting requires `read_reports` and Level 2 protected customer data access. The product workspace also requires `read_products`. Confirm eligibility and app permissions for each installation; see [Shopify's reporting requirements](https://shopify.dev/docs/apps/build/shopifyql/graphql-admin-api). A Shopify Basic subscription alone does not establish API reporting access.
 
 **The interface displays orders, not Shopify sales.** The current provider query also fetches and stores `total_sales` in its source snapshot. Missing reporting access is shown as an error instead of substituting calculated order totals. The default Admin API version is `2026-07`.
 
 ## Reporting rules
 
-| Metric / behavior | Handling |
-| --- | --- |
-| Spend | Google's reported cost, with micros converted to currency units |
-| Purchases | Conversions in Google's `PURCHASE` category; values may be fractional |
+| Metric / behavior | Handling                                                                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Spend             | Google's reported cost, with micros converted to currency units                                                                           |
+| Purchases         | Conversions in Google's `PURCHASE` category; values may be fractional                                                                     |
 | Cost per purchase | Google's cost-per-conversion metric only when all nonzero conversions are purchases and purchase count is positive; otherwise unavailable |
-| Budget | Current source configuration, separate from actual spend |
-| Shared budget | One entry per budget ID, with its campaigns |
-| Shopify orders | ShopifyQL's reported order count |
-| Reporting day | Each provider account's own time zone |
-| Currency | Original source currency, with no conversion |
-| Missing data | Unavailable remains unavailable; missing values are not turned into zero |
-| Provider failure | Last successful snapshot is retained with a source error |
+| Budget            | Current source configuration, separate from actual spend                                                                                  |
+| Shared budget     | One entry per budget ID, with its campaigns                                                                                               |
+| Shopify orders    | ShopifyQL's reported order count                                                                                                          |
+| Reporting range   | Requested directly from each provider; each provider account keeps its own time zone                                                      |
+| Currency          | Original source currency, with no conversion                                                                                              |
+| Missing data      | Unavailable remains unavailable; missing values are not turned into zero                                                                  |
+| Provider failure  | Last successful snapshot is retained with a source error                                                                                  |
 
 SpendDesk does not calculate profit, ROAS, blended CPA, or a combined store budget. Financial values are not added across stores or currencies. Current budget settings are not presented as historical budgets.
 
-A normal sync refreshes **today and the previous three days** to capture adjustments. Older single dates can be refreshed manually. Snapshots older than one hour are marked out of date, so that indicator can appear between scheduled refreshes.
+A normal sync refreshes **today and the previous three days** to capture adjustments. Presets and custom ranges are requested directly from Google Ads and Shopify and stored as range snapshots; SpendDesk does not add daily snapshots together. Snapshots older than one hour are marked out of date, so that indicator can appear between scheduled refreshes.
+
+The **Export report** action uses the active date range and produces a UTF-8 CSV. It keeps source currencies separate and includes source errors instead of filling unavailable values with zero.
 
 ### Scheduled refreshes
 
-The worker checks every 15 minutes and skips until a store-count-based interval has elapsed. Current intervals are approximately **2 hours for 7 stores** and **6 hours 45 minutes for 25 stores**. The implementation reserves headroom for Google Ads Explorer limits; manual refreshes use the same API allowance. Adjust `lib/schedule.ts` if your access level or workload changes.
+The local scheduler refreshes **every hour**, regardless of store count. The scheduled worker checks every 15 minutes and skips until one hour has elapsed since its last completed sync. Manual refreshes remain available. Provider quotas still apply to both automatic and manual requests; the hourly schedule does not increase the Google Ads API allowance.
 
 PostgreSQL advisory locks prevent overlapping sync passes. Provider requests use bounded retries and 30-second timeouts.
 
@@ -145,25 +149,25 @@ PostgreSQL advisory locks prevent overlapping sync passes. Provider requests use
 
 Create three services in one Railway project:
 
-| Service | Configuration |
-| --- | --- |
-| `Postgres` | Persistent PostgreSQL database |
-| `dashboard` | Included Dockerfile; start `npm run start`; pre-deploy `npm run db:migrate`; health check `/api/health` |
+| Service       | Configuration                                                                                                       |
+| ------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `Postgres`    | Persistent PostgreSQL database                                                                                      |
+| `dashboard`   | Included Dockerfile; start `npm run start`; pre-deploy `npm run db:migrate`; health check `/api/health`             |
 | `report-sync` | Same source and Dockerfile; start `npm run sync`; cron `*/15 * * * *`; restart policy `NEVER`; no HTTP health check |
 
 ### Environment variables
 
-| Variable | Web | Worker | Purpose |
-| --- | --- | --- | --- |
-| `DATABASE_URL` | Required | Required | Same private Railway PostgreSQL connection reference |
-| `ENCRYPTION_KEY` | Required | Required | Same 64-character hexadecimal key |
-| `SESSION_SECRET` | Required | — | Random signing secret |
-| `SETUP_TOKEN` | Required | — | Random one-time enrollment token |
-| `APP_URL` | Required | — | Exact public HTTPS origin, without a trailing slash |
-| `SYNC_SCHEDULED` | `false` | `true` | Enable adaptive interval checks on the worker |
-| `GOOGLE_ADS_API_VERSION` | Optional | Optional | Defaults to `v25`; keep versions consistent |
-| `SHOPIFY_API_VERSION` | Optional | Optional | Defaults to `2026-07`; keep versions consistent |
-| `LOCAL_DEV_AUTH` | `false` | `false` | Development override; never bypasses production authentication |
+| Variable                 | Web      | Worker   | Purpose                                                        |
+| ------------------------ | -------- | -------- | -------------------------------------------------------------- |
+| `DATABASE_URL`           | Required | Required | Same private Railway PostgreSQL connection reference           |
+| `ENCRYPTION_KEY`         | Required | Required | Same 64-character hexadecimal key                              |
+| `SESSION_SECRET`         | Required | —        | Random signing secret                                          |
+| `SETUP_TOKEN`            | Required | —        | Random one-time enrollment token                               |
+| `APP_URL`                | Required | —        | Exact public HTTPS origin, without a trailing slash            |
+| `SYNC_SCHEDULED`         | `false`  | `true`   | Enable hourly interval checks on the worker                    |
+| `GOOGLE_ADS_API_VERSION` | Optional | Optional | Defaults to `v25`; keep versions consistent                    |
+| `SHOPIFY_API_VERSION`    | Optional | Optional | Defaults to `2026-07`; keep versions consistent                |
+| `LOCAL_DEV_AUTH`         | `false`  | `false`  | Development override; never bypasses production authentication |
 
 Use Railway's private database reference for `DATABASE_URL`. Generate distinct secrets outside version control. Losing `ENCRYPTION_KEY` makes saved credentials unreadable. Back up the database and encryption key separately.
 
@@ -185,20 +189,20 @@ Docker excludes `.env*` files and local data. `scripts/import-state.ts` is an op
 
 ## Development and validation
 
-| Command | Purpose |
-| --- | --- |
-| `npm run local` | Start local database, migrations, app, and scheduler |
-| `npm run local:setup` | Open the private local setup link on macOS |
-| `npm run db:local` | Start only the managed local database |
-| `npm run dev` | Start Next.js using existing configuration |
-| `npm run db:migrate` | Apply pending SQL migrations |
-| `npm run sync` | Run one reporting pass and exit |
-| `npm test` | Run unit tests with synthetic provider fixtures |
-| `npm run test:integration` | Run integration tests against isolated local test data |
-| `npm run test:browser` | Run browser checks against an isolated local test server |
-| `npm run typecheck` | Check TypeScript types |
-| `npm run build` | Build and type-check the production application |
-| `npm run start` | Start the production application after building |
+| Command                    | Purpose                                                  |
+| -------------------------- | -------------------------------------------------------- |
+| `npm run local`            | Start local database, migrations, app, and scheduler     |
+| `npm run local:setup`      | Open the private local setup link on macOS               |
+| `npm run db:local`         | Start only the managed local database                    |
+| `npm run dev`              | Start Next.js using existing configuration               |
+| `npm run db:migrate`       | Apply pending SQL migrations                             |
+| `npm run sync`             | Run one reporting pass and exit                          |
+| `npm test`                 | Run unit tests with synthetic provider fixtures          |
+| `npm run test:integration` | Run integration tests against isolated local test data   |
+| `npm run test:browser`     | Run browser checks against an isolated local test server |
+| `npm run typecheck`        | Check TypeScript types                                   |
+| `npm run build`            | Build and type-check the production application          |
+| `npm run start`            | Start the production application after building          |
 
 Integration and browser tests require the managed local database to be running. They use separate `storedesk_test` and `storedesk_browser_test` databases, not production data. Browser tests start a server on port 3100 and use installed Google Chrome; set `PLAYWRIGHT_CHROME_PATH` to your Chrome executable. Browser setup clears its own test database.
 
@@ -227,14 +231,14 @@ Never commit environment files, `.local/`, provider tokens, private keys, databa
 
 ## Troubleshooting
 
-| Symptom | Check |
-| --- | --- |
-| Google access blocked | OAuth test users and the correct Cloud project/client |
-| Redirect mismatch | Exact `APP_URL/api/google/callback` registration |
-| Refresh authorization fails | Reconnect the same email and review OAuth testing/publishing status |
-| Shopify reporting unavailable | Installed app scopes and protected customer data eligibility |
-| Worker skips a tick | Expected until the adaptive interval has elapsed |
-| Reports remain stale | Sync errors; matching web/worker database and encryption key |
-| Local database port busy | Another managed runtime using port 55432 |
+| Symptom                       | Check                                                               |
+| ----------------------------- | ------------------------------------------------------------------- |
+| Google access blocked         | OAuth test users and the correct Cloud project/client               |
+| Redirect mismatch             | Exact `APP_URL/api/google/callback` registration                    |
+| Refresh authorization fails   | Reconnect the same email and review OAuth testing/publishing status |
+| Shopify reporting unavailable | Installed app scopes and protected customer data eligibility        |
+| Worker skips a tick           | Expected until the hourly interval has elapsed                      |
+| Reports remain stale          | Sync errors; matching web/worker database and encryption key        |
+| Local database port busy      | Another managed runtime using port 55432                            |
 
 SpendDesk is independent and is not affiliated with Google, Shopify, or Railway.

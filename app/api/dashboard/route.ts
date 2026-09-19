@@ -14,7 +14,23 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url),
       period = url.searchParams.get("period") || "yesterday",
-      custom = url.searchParams.get("date");
+      custom = url.searchParams.get("date"),
+      from = url.searchParams.get("from"),
+      to = url.searchParams.get("to");
+    const range = !!from || !!to;
+    if (
+      range &&
+      (!from ||
+        !to ||
+        !validDate(from) ||
+        !validDate(to) ||
+        from > to ||
+        (Date.parse(to) - Date.parse(from)) / 86400000 > 365)
+    )
+      return Response.json(
+        { error: "Choose a valid date range of 366 days or less." },
+        { status: 400 },
+      );
     if (!["yesterday", "today", "custom"].includes(period))
       return Response.json(
         { error: "Choose Yesterday, Today, or a custom date." },
@@ -27,7 +43,9 @@ export async function GET(request: Request) {
     const [stores, connections, reports] = await Promise.all([
       db()`SELECT id,name,domain,cid,group_id,manager_cid,(shop_cipher IS NOT NULL) AS shop_connected FROM stores ORDER BY name`,
       db()`SELECT group_id,email FROM google_connections ORDER BY group_id`,
-      db()`SELECT store_id,source,report_date::text,payload,error,checked_at FROM reports WHERE report_date >= CURRENT_DATE - INTERVAL '5 days' OR report_date=${custom || "1900-01-01"}::date ORDER BY checked_at DESC`,
+      range && from !== to
+        ? db()`SELECT store_id,source,(start_date::text || ' – ' || end_date::text) AS report_date,payload,error,checked_at FROM report_ranges WHERE start_date=${from!}::date AND end_date=${to!}::date ORDER BY checked_at DESC`
+        : db()`SELECT store_id,source,report_date::text,payload,error,checked_at FROM reports WHERE report_date >= CURRENT_DATE - INTERVAL '5 days' OR report_date=${from || custom || "1900-01-01"}::date ORDER BY checked_at DESC`,
     ]);
     const mapped = stores.map((store) => {
       const report = (source: string) => {
@@ -36,7 +54,12 @@ export async function GET(request: Request) {
         );
         const tz =
           relevant.find((r) => r.payload)?.payload?.timezone || "Asia/Kolkata";
-        const date = custom || dateInZone(tz, period === "today" ? 0 : -1);
+        const date =
+          range && from && to
+            ? from === to
+              ? from
+              : `${from} – ${to}`
+            : custom || dateInZone(tz, period === "today" ? 0 : -1);
         return relevant.find((r) => r.report_date === date);
       };
       const ads = report("ads"),
