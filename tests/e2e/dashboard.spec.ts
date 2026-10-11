@@ -179,6 +179,10 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
   await page.getByLabel("Filter by Google login").click();
   await page.getByRole("option", { name: "All Google accounts" }).click();
   await expect(page.getByText("₹500.00", { exact: true })).toBeVisible();
+  let rangeSyncs = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/sync")) rangeSyncs++;
+  });
   await page.getByRole("button", { name: "Choose report date range" }).click();
   await expect(page.locator(".date-preset-list")).toBeVisible();
   await expect(page.locator(".rdp-month")).toHaveCount(2);
@@ -198,6 +202,7 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
     .getByRole("button", { name: "Yesterday", exact: true })
     .click();
   await page.getByRole("button", { name: "Apply", exact: true }).click();
+  expect(rangeSyncs).toBe(0);
   const exported = await page.request.get(
     `/api/export?from=${yesterday}&to=${yesterday}`,
   );
@@ -243,6 +248,7 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
     expect(route.request().postDataJSON()).toEqual({
       from: exportStart,
       to: yesterday,
+      missingOnly: true,
     });
     await route.fulfill({ status: 202, json: { ok: true } });
   });

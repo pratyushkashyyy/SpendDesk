@@ -29,6 +29,7 @@ export async function POST(request: Request) {
       await syncReports(
         body.from || body.date,
         body.from ? body.to : undefined,
+        body.missingOnly === true,
       );
     } catch {
       console.error("Manual report sync failed.");

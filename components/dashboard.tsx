@@ -303,7 +303,7 @@ export default function Dashboard() {
         const sync = await fetch("/api/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ from, to }),
+          body: JSON.stringify({ from, to, missingOnly: true }),
         });
         if (!sync.ok)
           throw new Error(
@@ -660,7 +660,6 @@ export default function Dashboard() {
                       setPeriod(nextPeriod);
                       setFrom(nextFrom);
                       setTo(nextTo);
-                      if (!demo) void refresh(nextFrom, nextTo);
                     }}
                   />
                 </div>

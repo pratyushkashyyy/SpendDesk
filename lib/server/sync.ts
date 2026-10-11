@@ -11,7 +11,11 @@ export type SyncStatus = {
   date?: string;
   failed?: boolean;
 };
-export async function syncReports(customDate?: string, endDate?: string) {
+export async function syncReports(
+  customDate?: string,
+  endDate?: string,
+  missingOnly = false,
+) {
   const connection = await db().reserve();
   let acquired = false;
   const status: SyncStatus = {
@@ -30,7 +34,21 @@ export async function syncReports(customDate?: string, endDate?: string) {
     acquired = lock.acquired;
     if (!acquired) return { busy: true, synced: 0, errors: 0 };
     await putSetting("sync_status", JSON.stringify(status));
-    const stores = await db()`SELECT * FROM stores ORDER BY group_id,name`;
+    const savedStores = await db()`SELECT * FROM stores ORDER BY group_id,name`;
+    let stores = [...savedStores];
+    const existing = new Set<string>();
+    if (missingOnly && customDate) {
+      const saved =
+        endDate && endDate !== customDate
+          ? await db()`SELECT store_id,source FROM report_ranges WHERE start_date=${customDate}::date AND end_date=${endDate}::date`
+          : await db()`SELECT store_id,source FROM reports WHERE report_date=${customDate}::date`;
+      for (const row of saved) existing.add(`${row.store_id}:${row.source}`);
+      stores = stores.filter(
+        (store) =>
+          !existing.has(`${store.id}:ads`) ||
+          (store.shop_cipher && !existing.has(`${store.id}:shop`)),
+      );
+    }
     const tokens = new Map<
       number,
       Awaited<ReturnType<typeof googleAccess>> | Error
@@ -43,6 +61,12 @@ export async function syncReports(customDate?: string, endDate?: string) {
       }
     for (const store of stores) {
       for (const source of ["ads", "shop"] as const) {
+        if (
+          missingOnly &&
+          (existing.has(`${store.id}:${source}`) ||
+            (source === "shop" && !store.shop_cipher))
+        )
+          continue;
         const previous =
           await db()`SELECT payload FROM reports WHERE store_id=${store.id} AND source=${source} AND payload IS NOT NULL ORDER BY checked_at DESC LIMIT 1`;
         const timezone = previous[0]?.payload?.timezone || "Asia/Kolkata";

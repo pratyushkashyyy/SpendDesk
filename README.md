@@ -135,7 +135,7 @@ ShopifyQL reporting requires `read_reports` and Level 2 protected customer data 
 
 SpendDesk does not calculate profit, ROAS, blended CPA, or a combined store budget. Financial values are not added across stores or currencies. Current budget settings are not presented as historical budgets.
 
-A normal sync refreshes **today and the previous three days** to capture adjustments. Presets and custom ranges are requested directly from Google Ads and Shopify and stored as range snapshots; SpendDesk does not add daily snapshots together. Snapshots older than one hour are marked out of date, so that indicator can appear between scheduled refreshes.
+A normal sync refreshes **today and the previous three days** to capture adjustments. Presets and custom ranges are requested directly from Google Ads and Shopify and stored as range snapshots; SpendDesk does not add daily snapshots together. Snapshots older than one hour are marked out of date, so that indicator can appear between scheduled refreshes. Saved date ranges, campaigns, and product snapshots are reused from PostgreSQL on subsequent views and exports, without an age-based provider fetch. A missing range is fetched and saved once. Use Refresh for updated source data; scheduled sync continues updating recent daily reports.
 
 The **Export report** action opens a dialog asking for 1–366 days and an end date (India time, inclusive), then produces a UTF-8 CSV for all stores and Google accounts. The default is seven days ending yesterday. Missing reports are prepared automatically; preparation may take a couple of minutes. It keeps source currencies separate and includes source errors instead of filling unavailable values with zero.
 

@@ -6,6 +6,7 @@ import postgres from "postgres";
 import { db, putSetting, getSetting } from "../../lib/server/db";
 import { saveGoogleConnection } from "../../lib/server/google-connections";
 import { encrypt, decrypt } from "../../lib/server/crypto";
+import { storeProducts } from "../../lib/server/store-products";
 import { syncReports } from "../../lib/server/sync";
 import { dateInZone } from "../../lib/reporting";
 
@@ -53,6 +54,7 @@ test("real PostgreSQL sync stores provider values, preserves snapshots on failur
   const id = randomUUID(),
     original = globalThis.fetch;
   let failAds = false;
+  let providerCalls = 0;
   await putSetting(
     "google_config",
     encrypt({
@@ -88,6 +90,7 @@ test("real PostgreSQL sync stores provider values, preserves snapshots on failur
     true,
   );
   globalThis.fetch = async (input, init) => {
+    providerCalls++;
     const target = String(input);
     if (target.includes("oauth2.googleapis.com"))
       return Response.json({ access_token: "qa-access" });
@@ -128,6 +131,7 @@ test("real PostgreSQL sync stores provider values, preserves snapshots on failur
             },
           ],
         });
+      if (q.includes("policy_summary")) return Response.json({ results: [] });
       return Response.json({
         results: [
           {
@@ -195,6 +199,46 @@ test("real PostgreSQL sync stores provider values, preserves snapshots on failur
     assert.ok(rangeRows.every((row) => row.end_date === rangeEnd));
     assert.ok(rangeRows.every((row) => row.payload.date.includes(rangeStart)));
     assert.ok(rangeRows.every((row) => row.payload.date.includes(rangeEnd)));
+    const callsBefore = providerCalls;
+    const reused = await syncReports(rangeStart, rangeEnd, true);
+    assert.equal(reused.synced, 0);
+    assert.equal(
+      providerCalls,
+      callsBefore,
+      "saved ranges require no provider calls",
+    );
+    await sql`DELETE FROM report_ranges WHERE store_id=${id} AND source='shop' AND start_date=${rangeStart}::date`;
+    const partial = await syncReports(rangeStart, rangeEnd, true);
+    assert.equal(partial.synced, 1, "only the missing source is fetched");
+    const snapshot = {
+      products: [],
+      campaigns: [],
+      performance: [],
+      campaignDaily: [],
+      links: [],
+      date: rangeStart,
+      currency: "INR",
+      timezone: "Asia/Kolkata",
+      catalogError: null,
+      adsError: null,
+      fetchedAt: "2020-01-01T00:00:00Z",
+    };
+    await sql`INSERT INTO store_product_snapshots(store_id,start_date,end_date,payload,checked_at) VALUES(${id},${rangeStart},${rangeEnd},${sql.json(snapshot)},'2020-01-01')`;
+    const [savedStore] = await sql`SELECT * FROM stores WHERE id=${id}`;
+    const productCalls = providerCalls;
+    const cachedProducts = await storeProducts(
+      savedStore,
+      rangeStart,
+      rangeEnd,
+      "INR",
+      "Asia/Kolkata",
+    );
+    assert.equal(cachedProducts.fetchedAt, snapshot.fetchedAt);
+    assert.equal(
+      providerCalls,
+      productCalls,
+      "old product snapshots remain reusable",
+    );
     const lock = await sql.reserve();
     await lock`SELECT pg_advisory_lock(734052)`;
     assert.equal((await syncReports()).busy, true);

@@ -1,3 +1,5 @@
+import { after } from "next/server";
+import { syncReports } from "@/lib/server/sync";
 import { guard } from "@/lib/server/auth";
 import { db, getSetting } from "@/lib/server/db";
 import { dateInZone, validDate } from "@/lib/reporting";
@@ -85,6 +87,29 @@ export async function GET(request: Request) {
         shopError: shop?.error || null,
       };
     });
+    // Reads reuse durable snapshots; only absent source/date pairs need providers.
+    if (from && to) {
+      const key = from === to ? from : `${from} – ${to}`;
+      const missing = stores.some((store) =>
+        ["ads", ...(store.shop_connected ? ["shop"] : [])].some(
+          (source) =>
+            !reports.some(
+              (report) =>
+                report.store_id === store.id &&
+                report.source === source &&
+                report.report_date === key,
+            ),
+        ),
+      );
+      if (missing)
+        after(async () => {
+          try {
+            await syncReports(from, to, true);
+          } catch {
+            console.error("Missing report preparation failed.");
+          }
+        });
+    }
     const storedSync = JSON.parse((await getSetting("sync_status")) || "null");
     if (storedSync?.running) {
       const [lock] =
