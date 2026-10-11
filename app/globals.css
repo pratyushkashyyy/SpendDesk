@@ -224,3 +224,135 @@ h1{font-size:32px;letter-spacing:-1.2px;font-weight:650;color:#242a3c}
 
 /* Shopify-style report range picker and export controls. */
 .shopify-date-trigger{display:flex;align-items:center;gap:10px;min-width:210px;padding:9px 11px;border:1px solid #dedde7;background:#fff;border-radius:7px;color:#5d5868;text-align:left}.shopify-date-trigger>span{display:flex;flex-direction:column;gap:2px;flex:1}.shopify-date-trigger strong{font-size:11px;font-weight:600}.shopify-date-trigger small{font-size:9px;color:#9994a2}.shopify-date-popover{width:auto!important;max-width:min(760px,calc(100vw - 24px));padding:0!important;display:grid!important;grid-template-columns:165px minmax(0,1fr);overflow:hidden}.date-preset-list{padding:16px 10px;background:#f8f8fa;border-right:1px solid #e7e6eb;display:flex;flex-direction:column;gap:3px}.date-preset-list>strong{font-size:11px;color:#817b8a;padding:4px 9px 10px}.date-preset-list button{text-align:left;padding:8px 9px;border-radius:6px;font-size:11px;color:#686271}.date-preset-list button:hover,.date-preset-list button[data-active=true]{background:#eceafd;color:#5746c6;font-weight:600}.date-calendar-panel{padding:14px;min-width:560px}.date-fields{display:flex;align-items:end;gap:10px;padding:0 3px 12px;border-bottom:1px solid #edebf1}.date-fields label{display:flex;flex-direction:column;gap:5px;font-size:9px;color:#8f8997;flex:1}.date-fields input{padding:8px 9px;border:1px solid #dfdce6;border-radius:6px;font-size:11px}.date-fields>span{padding-bottom:9px;color:#aaa3b2}.date-calendar-panel [data-slot=calendar]{margin:auto;padding-top:14px}.date-actions{display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #edebf1;padding-top:12px}.date-actions button{min-width:76px}.report-toolbar{flex-wrap:wrap}@media(max-width:760px){.shopify-date-trigger{min-width:180px}.shopify-date-popover{grid-template-columns:1fr;overflow-y:auto;max-height:min(700px,85vh)}.date-preset-list{display:grid;grid-template-columns:1fr 1fr;border-right:0;border-bottom:1px solid #e7e6eb}.date-preset-list>strong{grid-column:1/-1}.date-calendar-panel{min-width:0}.date-calendar-panel [data-slot=calendar] .md\:flex-row{flex-direction:column}.date-fields{align-items:stretch}.date-fields>span{display:none}}
+
+.inline-store-cell{white-space:normal!important;padding:0!important}.inline-store-campaigns{padding:24px 28px;background:#faf9fd;border-top:1px solid #e8e4f1;border-bottom:1px solid #e8e4f1}.inline-store-campaigns>.products-heading h3{font-size:18px;font-weight:600;color:#514a67}.inline-store-campaigns .store-products{margin:18px 0 0}.inline-store-campaigns .product-campaign{background:white;border:1px solid #e8e4f1}@media(max-width:600px){.inline-store-campaigns{padding:18px 14px}}
+
+.store-navigation-row{cursor:pointer}
+.campaign-expand{display:flex;align-items:center;gap:10px;font-weight:600;text-align:left;cursor:pointer;color:#6554d7}.campaign-performance{border-top:1px solid #e8e4f1;margin-top:20px;padding-top:18px}.campaign-performance h4{font-weight:600}.campaign-daily-table{overflow-x:auto;margin:16px 0}.campaign-daily-table table{width:100%;border-collapse:collapse}.campaign-daily-table th,.campaign-daily-table td{text-align:right;padding:12px;border-bottom:1px solid #e8e4f1;font-size:12px}.campaign-daily-table th:first-child,.campaign-daily-table td:first-child{text-align:left}.campaign-daily-table th{color:#857a98}
+
+/* Larger workspace text and an always-visible sidebar control. */
+body{font-size:15px}
+.sidebar-toggle{display:inline-flex;width:auto;height:36px;gap:8px;padding:0 11px;color:#6554d7;border:1px solid #e4e1ef;border-radius:8px;background:#fff}
+.sidebar-toggle:hover{background:#f4f1fb}
+.sidebar-trigger-label{font-size:13px;font-weight:550}
+.breadcrumbs{font-size:14px}
+.private-pill{font-size:12px}
+.workspace-chip strong{font-size:13px}
+.workspace-chip small{font-size:11px}
+.nav-label{font-size:10px}
+.nav-button{font-size:14px}
+.nav-badge{font-size:11px}
+.side-logins button{font-size:12px}
+.side-logins small,.sidebar-empty{font-size:11px}
+.private-note{font-size:12px}
+.profile strong{font-size:13px}
+.profile small{font-size:11px}
+.eyebrow{font-size:11px}
+.page-heading .muted{font-size:14px}
+.refresh-button{font-size:13px}
+.connection-banner strong{font-size:14px}
+.connection-banner p{font-size:13px}
+.overview-strip p{font-size:13px}
+.overview-strip strong small{font-size:12px}
+.panel-heading h2{font-size:19px}
+.panel-heading p{font-size:13px}
+.performance-table{font-size:14px}
+.performance-table th{font-size:12px}
+.performance-table th small{font-size:10px}
+.performance-table td,.performance-table .numeric{font-size:14px}
+.store-cell strong{font-size:13px}
+.store-cell small{font-size:11px}
+.cell-sub{font-size:10px}
+.row-status{font-size:11px}
+.search-box input,.login-filter{font-size:13px}
+.table-footer,.report-notes{font-size:11px}
+.mini-card-heading strong{font-size:13px}
+.mini-card p{font-size:12px}
+.sync-status-line{font-size:11px}
+.form-error{font-size:13px}
+.sheet-body{font-size:14px}
+.product-explainer{font-size:13px}
+.product-stats span{font-size:12px}
+.product-stats strong{font-size:16px}
+.campaign-daily-table th,.campaign-daily-table td{font-size:13px}
+@media(max-width:767px){
+  .page-heading .muted{font-size:13px}
+  .connection-banner strong{font-size:13px}
+  .connection-banner p{font-size:12px}
+  .overview-strip p{font-size:12px}
+  .table-footer{font-size:10px}
+  .workspace-footer{font-size:10px}
+  .private-pill{font-size:11px}
+}
+
+/* Compact icon rail keeps the sidebar toggle reachable when collapsed. */
+.group[data-collapsible="icon"] .app-sidebar .side-header{align-items:center;padding:12px 5px}
+.group[data-collapsible="icon"] .app-sidebar .sidebar-toggle{width:36px;justify-content:center;padding:0}
+.group[data-collapsible="icon"] .app-sidebar .sidebar-trigger-label,
+.group[data-collapsible="icon"] .app-sidebar .brand,
+.group[data-collapsible="icon"] .app-sidebar .workspace-chip div,
+.group[data-collapsible="icon"] .app-sidebar .workspace-chip>svg,
+.group[data-collapsible="icon"] .app-sidebar .nav-label,
+.group[data-collapsible="icon"] .app-sidebar .side-logins,
+.group[data-collapsible="icon"] .app-sidebar .private-note,
+.group[data-collapsible="icon"] .app-sidebar .profile>span:nth-child(2){display:none}
+.group[data-collapsible="icon"] .app-sidebar .workspace-chip{justify-content:center;margin-top:10px;padding:6px}
+.group[data-collapsible="icon"] .app-sidebar .side-content{padding:0 5px}
+.group[data-collapsible="icon"] .app-sidebar .nav-button{width:38px;height:42px;justify-content:center;margin:4px auto;padding:0}
+.group[data-collapsible="icon"] .app-sidebar .nav-button>span:first-of-type{display:none}
+.group[data-collapsible="icon"] .app-sidebar .side-footer{align-items:center;padding:8px 4px}
+.group[data-collapsible="icon"] .app-sidebar .profile{justify-content:center;gap:7px;padding:12px 0 2px}
+
+/* Increase small dashboard text further for easier reading. */
+body{font-size:16px}
+.breadcrumbs{font-size:15px}
+.private-pill{font-size:13px}
+.workspace-chip strong{font-size:14px}
+.workspace-chip small{font-size:12px}
+.nav-label{font-size:11px}
+.nav-button{font-size:15px}
+.side-logins button{font-size:14px}
+.side-logins small,.sidebar-empty{font-size:12px}
+.private-note,.profile small{font-size:12px}
+.profile strong{font-size:14px}
+.eyebrow{font-size:12px}
+.page-heading .muted{font-size:15px}
+.refresh-button{font-size:14px}
+.connection-banner strong{font-size:15px}
+.connection-banner p{font-size:14px}
+.overview-strip p{font-size:14px}
+.overview-strip strong small{font-size:13px}
+.panel-heading h2{font-size:20px}
+.panel-heading p{font-size:14px}
+.performance-table{font-size:15px}
+.performance-table th{font-size:13px}
+.performance-table th small{font-size:11px}
+.performance-table td,.performance-table .numeric{font-size:15px}
+.store-cell strong{font-size:14px}
+.store-cell small{font-size:12px}
+.cell-sub{font-size:11px}
+.row-status{font-size:12px}
+.search-box input,.login-filter{font-size:14px}
+.table-footer,.report-notes{font-size:12px}
+.mini-card-heading strong{font-size:14px}
+.mini-card p{font-size:13px}
+.sync-status-line{font-size:12px}
+.form-error{font-size:14px}
+.sheet-body{font-size:15px}
+.product-explainer{font-size:14px}
+.product-stats span{font-size:13px}
+.product-stats strong{font-size:17px}
+.campaign-daily-table th,.campaign-daily-table td{font-size:14px}
+.campaign-policy-alert{display:flex;flex-wrap:wrap;align-items:baseline;gap:5px 10px;margin-top:14px;padding:12px 14px;border:1px solid #f0d9c8;border-radius:8px;background:#fff7f0;color:#895c46;font-size:13px;line-height:1.5}
+.campaign-policy-alert strong{font-weight:650}
+.campaign-policy-alert span,.campaign-policy-alert small{color:#9c7764}
+.campaign-policy-alert small{width:100%;font-size:12px}
+@media(max-width:767px){
+  .page-heading .muted{font-size:14px}
+  .connection-banner strong{font-size:14px}
+  .connection-banner p{font-size:13px}
+  .overview-strip p{font-size:13px}
+  .table-footer{font-size:11px}
+  .workspace-footer{font-size:11px}
+  .private-pill{font-size:12px}
+}

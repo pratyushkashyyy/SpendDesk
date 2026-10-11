@@ -20,12 +20,24 @@ export async function storeProducts(
     const ttl =
       previous?.catalogError || previous?.adsError ? 5 * 60000 : 60 * 60000;
     let data = previous;
-    if (!data || force || Date.now() - Date.parse(cached.checked_at) > ttl) {
+    const targetCpaMissing =
+      !!data?.campaigns?.some((campaign) => !Object.hasOwn(campaign, "targetCpa"));
+    if (
+      !data ||
+      !data.campaignDaily ||
+      targetCpaMissing ||
+      force ||
+      Date.now() - Date.parse(cached.checked_at) > ttl
+    ) {
       const [catalog, ads] = await Promise.allSettled([
         fetchCatalog(store),
         fetchProductAds(store, startDate, endDate),
       ]);
       data = {
+        campaignDaily:
+          ads.status === "fulfilled"
+            ? ads.value.campaignDaily
+            : previous?.campaignDaily || [],
         products:
           catalog.status === "fulfilled"
             ? catalog.value

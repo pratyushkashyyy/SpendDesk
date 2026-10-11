@@ -8,6 +8,7 @@ import {
   Link2,
   X,
 } from "lucide-react";
+import CampaignPerformance from "@/components/campaign-performance";
 import { Button } from "@/components/ui/button";
 import { formatMoney } from "@/lib/reporting";
 import { matchProduct, productRows } from "@/lib/product-matching";
@@ -66,14 +67,29 @@ function example(store: Store, date: string): StoreProductsData {
 function CampaignCard({
   campaign: c,
   currency,
+  store,
+  demo = false,
 }: {
   campaign: CampaignDetail;
   currency: string;
+  store: Store;
+  demo?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const policyAlerts = store.ads?.alerts?.filter(
+    (alert) => alert.campaignId === c.id,
+  );
   return (
     <div className="product-campaign">
       <div className="product-campaign-title">
-        <strong>{c.name}</strong>
+        <button
+          className="campaign-expand"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((open) => !open)}
+        >
+          {c.name}
+          <ChevronDown size={16} className={expanded ? "rotate-180" : ""} />
+        </button>
         <span className="subtle-tag">{c.status.toLowerCase()}</span>
       </div>
       <p className="muted">
@@ -92,6 +108,14 @@ function CampaignCard({
           </strong>
         </span>
         <span>
+          Target CPA
+          <strong>
+            {c.targetCpa != null
+              ? formatMoney(c.targetCpa, currency)
+              : "Not set"}
+          </strong>
+        </span>
+        <span>
           Clicks<strong>{value(c.clicks)}</strong>
         </span>
         <span>
@@ -101,6 +125,29 @@ function CampaignCard({
           Conversions<strong>{value(c.conversions)}</strong>
         </span>
       </div>
+      {policyAlerts?.map((alert, index) => (
+        <div
+          className="campaign-policy-alert"
+          key={`${alert.adName}:${index}`}
+          role="status"
+        >
+          <strong>
+            Policy alert · {alert.status.toLowerCase().replaceAll("_", " ")}
+          </strong>
+          <span>{alert.adName}</span>
+          {alert.details?.length ? (
+            <small>{alert.details.join(" · ")}</small>
+          ) : null}
+        </div>
+      ))}
+      {expanded && (
+        <CampaignPerformance
+          store={store}
+          campaign={c}
+          currency={currency}
+          demo={demo}
+        />
+      )}
       {c.sharedBudget && (
         <small className="muted">
           Shared budget · also used by other campaigns
@@ -114,17 +161,21 @@ export default function StoreProducts({
   from,
   to,
   demo,
+  canAssign = false,
+  initialTab = "products",
 }: {
   store: Store;
   from: string;
   to: string;
   demo: boolean;
+  canAssign?: boolean;
+  initialTab?: "products" | "campaigns";
 }) {
   const [data, setData] = useState<StoreProductsData | null>(null),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [search, setSearch] = useState(""),
-    [tab, setTab] = useState("products"),
+    [tab, setTab] = useState(initialTab),
     [saving, setSaving] = useState(false);
   const sequence = useRef(0);
   const load = useCallback(
@@ -186,6 +237,7 @@ export default function StoreProducts({
     campaignId: string,
     action: "link" | "unlink",
   ) {
+    if (!canAssign || demo) return;
     setSaving(true);
     setError("");
     try {
@@ -333,8 +385,10 @@ export default function StoreProducts({
               </label>
               <p className="muted product-explainer">
                 Expand a product to see its reported advertising activity.
-                Assign campaigns when a product link isn’t reported. Conversions
-                include all conversion types.
+                {canAssign &&
+                  !demo &&
+                  "Assign campaigns when a product link isn’t reported. "}
+                Conversions include all conversion types.
               </p>
               {products.map((p) => {
                 const rows = productRows(p.id, data.products, data.performance);
@@ -389,8 +443,10 @@ export default function StoreProducts({
                       </a>
                       {!ids.length && (
                         <p className="muted">
-                          No product-to-campaign link for this date. You can
-                          assign a campaign below.
+                          No product-to-campaign link for this date.
+                          {canAssign && !demo
+                            ? " You can assign a campaign below."
+                            : " Open Edit from the overview to assign a campaign."}
                         </p>
                       )}
                       {ids.map((id) => {
@@ -404,7 +460,7 @@ export default function StoreProducts({
                                   ? "Reported product link"
                                   : "Manually assigned"}
                               </span>
-                              {manual.includes(id) && !demo && (
+                              {manual.includes(id) && canAssign && !demo && (
                                 <button
                                   disabled={saving}
                                   aria-label={`Remove ${c?.name || id} from ${p.title}`}
@@ -418,6 +474,8 @@ export default function StoreProducts({
                             {c ? (
                               <CampaignCard
                                 campaign={c}
+                                store={store}
+                                demo={demo}
                                 currency={data.currency}
                               />
                             ) : (
@@ -466,7 +524,7 @@ export default function StoreProducts({
                           </div>
                         );
                       })}
-                      {!demo && (
+                      {canAssign && !demo && (
                         <label className="campaign-assignment">
                           Assign another campaign
                           <select
@@ -543,6 +601,8 @@ export default function StoreProducts({
               {data.campaigns.map((c) => (
                 <CampaignCard
                   campaign={c}
+                  store={store}
+                  demo={demo}
                   currency={data.currency}
                   key={c.id}
                 />

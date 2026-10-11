@@ -88,18 +88,21 @@ export async function fetchProductAds(
   const auth = await googleAccess(store.group_id);
   const query = (q: string) => adsQuery(store.cid, store.manager_cid, auth, q);
   const fields =
-    "campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign_budget.id, campaign_budget.amount_micros, campaign_budget.period, campaign_budget.explicitly_shared";
+    "campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign.bidding_strategy_type, campaign.target_cpa.target_cpa_micros, campaign.maximize_conversions.target_cpa_micros, bidding_strategy.target_cpa.target_cpa_micros, campaign_budget.id, campaign_budget.amount_micros, campaign_budget.period, campaign_budget.explicitly_shared";
   const dateFilter =
     startDate === endDate
       ? `segments.date = '${startDate}'`
       : `segments.date BETWEEN '${startDate}' AND '${endDate}'`;
-  const [configured, totals, performance] = await Promise.all([
+  const [configured, totals, performance, daily] = await Promise.all([
     query(`SELECT ${fields} FROM campaign WHERE campaign.status != REMOVED`),
     query(
       `SELECT campaign.id, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM campaign WHERE ${dateFilter}`,
     ),
     query(
       `SELECT campaign.id, segments.product_item_id, segments.product_title, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM shopping_performance_view WHERE ${dateFilter}`,
+    ),
+    query(
+      `SELECT campaign.id, segments.date, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM campaign WHERE ${dateFilter} ORDER BY segments.date DESC`,
     ),
   ]);
   const campaigns: CampaignDetail[] = configured.map((r) => {
@@ -116,6 +119,12 @@ export async function fetchProductAds(
           : null,
       budgetPeriod: r.campaignBudget?.period || "",
       sharedBudget: !!r.campaignBudget?.explicitlyShared,
+      targetCpa: micros(
+        r.campaign?.maximizeConversions?.targetCpaMicros ??
+          r.campaign?.targetCpa?.targetCpaMicros ??
+          r.biddingStrategy?.targetCpa?.targetCpaMicros,
+      ),
+      biddingStrategy: r.campaign?.biddingStrategyType || "",
       spend: micros(m?.costMicros),
       clicks: numberOrNull(m?.clicks),
       impressions: numberOrNull(m?.impressions),
@@ -131,5 +140,16 @@ export async function fetchProductAds(
     impressions: numberOrNull(r.metrics?.impressions),
     conversions: numberOrNull(r.metrics?.conversions),
   }));
-  return { campaigns, performance: rows };
+  return {
+    campaigns,
+    performance: rows,
+    campaignDaily: daily.map((r) => ({
+      campaignId: r.campaign.id,
+      date: r.segments.date,
+      spend: micros(r.metrics?.costMicros),
+      clicks: numberOrNull(r.metrics?.clicks),
+      impressions: numberOrNull(r.metrics?.impressions),
+      conversions: numberOrNull(r.metrics?.conversions),
+    })),
+  };
 }

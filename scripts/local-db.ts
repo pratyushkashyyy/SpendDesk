@@ -94,12 +94,16 @@ if (process.argv.includes("--app")) {
     sync = spawn(
       process.execPath,
       ["--env-file=.env.local", "--import", "tsx", "scripts/sync.ts"],
-      { stdio: "inherit" },
+      {
+        stdio: "inherit",
+        env: { ...process.env, SYNC_SCHEDULED: "true" },
+      },
     );
     sync.on("exit", () => {
       sync = undefined;
     });
   };
+  refresh();
   timer = setInterval(refresh, refreshIntervalMinutes() * 60 * 1000);
   console.log("Local app and hourly sync scheduler started.");
   app.on("exit", () => {

@@ -14,6 +14,15 @@ export type Campaign = {
   status: string;
   spend: number | null;
   budgetId: string;
+  targetCpa: number | null;
+  biddingStrategy: string;
+};
+export type AdsAlert = {
+  campaignId: string;
+  campaignName: string;
+  adName: string;
+  status: string;
+  details: string[];
 };
 export type CatalogProduct = {
   id: string;
@@ -31,6 +40,8 @@ export type CampaignDetail = Campaign & {
   budget: number | null;
   budgetPeriod: string;
   sharedBudget: boolean;
+  targetCpa: number | null;
+  biddingStrategy: string;
 };
 export type ProductPerformance = {
   itemId: string;
@@ -41,7 +52,16 @@ export type ProductPerformance = {
   impressions: number | null;
   conversions: number | null;
 };
+export type CampaignDay = {
+  campaignId: string;
+  date: string;
+  spend: number | null;
+  clicks: number | null;
+  impressions: number | null;
+  conversions: number | null;
+};
 export type StoreProductsData = {
+  campaignDaily?: CampaignDay[];
   products: CatalogProduct[];
   campaigns: CampaignDetail[];
   performance: ProductPerformance[];
@@ -62,6 +82,7 @@ export type AdsReport = {
   timezone: string;
   budgets: Budget[];
   campaigns: Campaign[];
+  alerts: AdsAlert[];
   fetchedAt: string;
   date: string;
   raw: unknown;

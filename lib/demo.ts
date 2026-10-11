@@ -72,8 +72,12 @@ export function demoStores(today = false, customDate?: string): Store[] {
             status: "ENABLED",
             spend,
             budgetId: "b1",
+            targetCpa: i % 3 === 0 ? 220 + i * 5 : null,
+            biddingStrategy:
+              i % 3 === 0 ? "TARGET_CPA" : "MAXIMIZE_CONVERSIONS",
           },
         ],
+        alerts: [],
         raw: null,
       },
       shop: {

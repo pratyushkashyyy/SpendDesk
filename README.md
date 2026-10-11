@@ -137,7 +137,7 @@ SpendDesk does not calculate profit, ROAS, blended CPA, or a combined store budg
 
 A normal sync refreshes **today and the previous three days** to capture adjustments. Presets and custom ranges are requested directly from Google Ads and Shopify and stored as range snapshots; SpendDesk does not add daily snapshots together. Snapshots older than one hour are marked out of date, so that indicator can appear between scheduled refreshes.
 
-The **Export report** action uses the active date range and produces a UTF-8 CSV. It keeps source currencies separate and includes source errors instead of filling unavailable values with zero.
+The **Export report** action opens a dialog asking for 1–366 days and an end date (India time, inclusive), then produces a UTF-8 CSV for all stores and Google accounts. The default is seven days ending yesterday. Missing reports are prepared automatically; preparation may take a couple of minutes. It keeps source currencies separate and includes source errors instead of filling unavailable values with zero.
 
 ### Scheduled refreshes
 

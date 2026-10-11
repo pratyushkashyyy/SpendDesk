@@ -76,7 +76,10 @@ export async function GET(request: Request) {
     ]);
     const byReport = (storeId: string, source: string) =>
       reports.find((r) => r.store_id === storeId && r.source === source);
-    const missing = stores.filter((s) => !byReport(s.id, "ads"));
+    const missing = stores.filter(
+      (s) =>
+        !byReport(s.id, "ads") || (s.shop_cipher && !byReport(s.id, "shop")),
+    );
     if (missing.length)
       return Response.json(
         {

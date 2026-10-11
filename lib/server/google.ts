@@ -60,6 +60,22 @@ export async function adsQuery(
   } while (pageToken);
   return rows;
 }
+function policyDetails(entries: any[] = []) {
+  return entries
+    .map((entry) => {
+      const topic = String(entry.topic || "")
+        .toLowerCase()
+        .replaceAll("_", " ");
+      const effect = String(entry.type || "")
+        .toLowerCase()
+        .replaceAll("_", " ");
+      if (!topic && !effect) return "";
+      if (!topic) return effect;
+      if (!effect) return topic;
+      return `${topic} — ${effect}`;
+    })
+    .filter(Boolean);
+}
 export async function fetchAds(
   store: { cid: string; manager_cid: string },
   auth: Awaited<ReturnType<typeof googleAccess>>,
@@ -81,17 +97,24 @@ export async function fetchAds(
     date === lastDate
       ? `segments.date = '${date}'`
       : `segments.date BETWEEN '${date}' AND '${lastDate}'`;
-  const [totals, categories, campaigns] = await Promise.all([
-    query(
-      `SELECT metrics.cost_micros, metrics.cost_per_conversion, metrics.conversions FROM customer WHERE ${dateFilter}`,
-    ),
-    query(
-      `SELECT segments.conversion_action_category, metrics.conversions FROM customer WHERE ${dateFilter}`,
-    ),
-    query(
-      `SELECT campaign.id, campaign.name, campaign.status, campaign_budget.id, campaign_budget.name, campaign_budget.amount_micros, campaign_budget.explicitly_shared, campaign_budget.period, metrics.cost_micros FROM campaign WHERE ${dateFilter}`,
-    ),
-  ]);
+  const [totals, categories, campaigns, policyAds, policyAssets] =
+    await Promise.all([
+      query(
+        `SELECT metrics.cost_micros, metrics.cost_per_conversion, metrics.conversions FROM customer WHERE ${dateFilter}`,
+      ),
+      query(
+        `SELECT segments.conversion_action_category, metrics.conversions FROM customer WHERE ${dateFilter}`,
+      ),
+      query(
+        `SELECT campaign.id, campaign.name, campaign.status, campaign.bidding_strategy_type, campaign.target_cpa.target_cpa_micros, campaign.maximize_conversions.target_cpa_micros, bidding_strategy.target_cpa.target_cpa_micros, campaign_budget.id, campaign_budget.name, campaign_budget.amount_micros, campaign_budget.explicitly_shared, campaign_budget.period, metrics.cost_micros FROM campaign WHERE ${dateFilter}`,
+      ),
+      query(
+        "SELECT campaign.id, campaign.name, ad_group_ad.ad.name, ad_group_ad.policy_summary.approval_status, ad_group_ad.policy_summary.policy_topic_entries FROM ad_group_ad WHERE campaign.status != REMOVED AND ad_group_ad.status != REMOVED AND ad_group_ad.policy_summary.approval_status IN (DISAPPROVED, AREA_OF_INTEREST_ONLY, APPROVED_LIMITED)",
+      ),
+      query(
+        "SELECT campaign.id, campaign.name, asset_group.name, asset_group_asset.policy_summary.approval_status, asset_group_asset.policy_summary.policy_topic_entries FROM asset_group_asset WHERE campaign.status != REMOVED AND asset_group_asset.status != REMOVED AND asset_group_asset.policy_summary.approval_status IN (DISAPPROVED, AREA_OF_INTEREST_ONLY, APPROVED_LIMITED)",
+      ),
+    ]);
   // Budget-only query also includes active campaigns with zero delivery in the selected period.
   const configured = await query(
     "SELECT campaign.id, campaign.name, campaign.status, campaign_budget.id, campaign_budget.name, campaign_budget.amount_micros, campaign_budget.explicitly_shared, campaign_budget.period FROM campaign WHERE campaign.status != REMOVED",
@@ -145,7 +168,31 @@ export async function fetchAds(
       status: r.campaign.status,
       budgetId: r.campaignBudget.id,
       spend: micros(r.metrics?.costMicros),
+      targetCpa: micros(
+        r.campaign?.maximizeConversions?.targetCpaMicros ??
+          r.campaign?.targetCpa?.targetCpaMicros ??
+          r.biddingStrategy?.targetCpa?.targetCpaMicros,
+      ),
+      biddingStrategy: r.campaign?.biddingStrategyType || "",
     })),
+    alerts: [
+      ...policyAds.map((r) => ({
+        campaignId: r.campaign.id,
+        campaignName: r.campaign.name,
+        adName: r.adGroupAd.ad.name || "Ad",
+        status: r.adGroupAd.policySummary.approvalStatus,
+        details: policyDetails(r.adGroupAd.policySummary.policyTopicEntries),
+      })),
+      ...policyAssets.map((r) => ({
+        campaignId: r.campaign.id,
+        campaignName: r.campaign.name,
+        adName: `Asset group ${r.assetGroup.name}`,
+        status: r.assetGroupAsset.policySummary.approvalStatus,
+        details: policyDetails(
+          r.assetGroupAsset.policySummary.policyTopicEntries,
+        ),
+      })),
+    ],
     fetchedAt: new Date().toISOString(),
     raw: { totals, categories, campaigns, configured },
   };

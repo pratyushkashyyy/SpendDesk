@@ -1,5 +1,12 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   LayoutGrid,
   ChartNoAxesCombined,
@@ -68,10 +75,11 @@ import {
   SidebarTrigger,
   SidebarInset,
 } from "@/components/ui/sidebar";
-import StoreProducts from "@/components/store-products";
+import StoreDetails from "@/components/store-details";
+import InlineStoreCampaigns from "@/components/inline-store-campaigns";
 import DateRangeFilter from "@/components/date-range-filter";
 import { demoStores } from "@/lib/demo";
-import { dateInZone, formatMoney } from "@/lib/reporting";
+import { dateInZone, formatMoney, validDate } from "@/lib/reporting";
 import type { DashboardData, Store, Period } from "@/lib/types";
 const initial: DashboardData = {
   stores: [],
@@ -114,6 +122,11 @@ function Time({ value }: { value?: string }) {
   );
 }
 export default function Dashboard() {
+  const [expandedStores, setExpandedStores] = useState<string[]>([]);
+  const openStore = (s: Store) =>
+    setExpandedStores((ids) =>
+      ids.includes(s.id) ? ids.filter((id) => id !== s.id) : [...ids, s.id],
+    );
   const [view, setView] = useState("overview"),
     [period, setPeriod] = useState<Period>("yesterday"),
     [from, setFrom] = useState(() => dateInZone("Asia/Kolkata", -1)),
@@ -133,6 +146,12 @@ export default function Dashboard() {
     [edit, setEdit] = useState<Store | null>(null),
     [addOpen, setAddOpen] = useState(false),
     [apiOpen, setApiOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportDays, setExportDays] = useState("7");
+  const [exportEnd, setExportEnd] = useState(() =>
+    dateInZone("Asia/Kolkata", -1),
+  );
+  const [exportError, setExportError] = useState("");
   const requestSequence = useRef(0);
   const load = useCallback(
     async (requestedFrom = from, requestedTo = to) => {
@@ -261,9 +280,41 @@ export default function Dashboard() {
     }
   }
   async function exportReport() {
+    const days = Number(exportDays);
+    if (
+      !Number.isInteger(days) ||
+      days < 1 ||
+      days > 366 ||
+      !validDate(exportEnd) ||
+      exportEnd > dateInZone("Asia/Kolkata")
+    ) {
+      setExportError("Choose 1–366 days and an end date up to today.");
+      return;
+    }
+    const start = new Date(`${exportEnd}T12:00:00Z`);
+    start.setUTCDate(start.getUTCDate() - days + 1);
+    const from = start.toISOString().slice(0, 10);
+    const to = exportEnd;
+    setExportError("");
     setExporting(true);
     try {
-      const response = await fetch(`/api/export?from=${from}&to=${to}`);
+      let response = await fetch(`/api/export?from=${from}&to=${to}`);
+      if (response.status === 409) {
+        const sync = await fetch("/api/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ from, to }),
+        });
+        if (!sync.ok)
+          throw new Error(
+            (await sync.json()).error || "Unable to prepare report.",
+          );
+        const deadline = Date.now() + 120000;
+        while (response.status === 409 && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          response = await fetch(`/api/export?from=${from}&to=${to}`);
+        }
+      }
       if (response.status === 401) {
         window.location.assign("/login");
         return;
@@ -281,11 +332,12 @@ export default function Dashboard() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
+      setExportOpen(false);
       setNotice(
         `Exported all account data for ${from === to ? from : `${from} to ${to}`}.`,
       );
     } catch (error) {
-      setNotice((error as Error).message);
+      setExportError((error as Error).message);
     } finally {
       setExporting(false);
     }
@@ -296,10 +348,12 @@ export default function Dashboard() {
   }
   return (
     <SidebarProvider
+      defaultOpen={false}
       style={{ "--sidebar-width": "248px" } as React.CSSProperties}
     >
-      <Sidebar className="app-sidebar">
+      <Sidebar className="app-sidebar" collapsible="icon">
         <SidebarHeader className="side-header">
+          <SidebarTrigger label="Sidebar" className="sidebar-toggle" />
           <div className="brand">
             <span className="brand-mark">
               <LayoutGrid size={18} />
@@ -330,6 +384,8 @@ export default function Dashboard() {
                   isActive={view === item.id}
                   onClick={() => setView(item.id)}
                   className="nav-button"
+                  tooltip={item.label}
+                  aria-label={item.label}
                 >
                   <item.icon size={18} />
                   <span>{item.label}</span>
@@ -406,7 +462,6 @@ export default function Dashboard() {
       <SidebarInset className="app-main">
         <header className="topbar">
           <div className="breadcrumbs">
-            <SidebarTrigger className="mobile-trigger" />
             <span>Workspace</span>
             <ChevronRight size={13} />
             <strong>
@@ -649,7 +704,10 @@ export default function Dashboard() {
                   <Button
                     variant="outline"
                     disabled={demo || exporting || !data.database}
-                    onClick={exportReport}
+                    onClick={() => {
+                      setExportError("");
+                      setExportOpen(true);
+                    }}
                   >
                     <Download size={14} />
                     {exporting ? "Preparing…" : "Export report"}
@@ -672,7 +730,7 @@ export default function Dashboard() {
                         </button>
                       </TableHead>
                       <TableHead>
-                        Daily budget<small>Google Ads · current</small>
+                        Total budget<small>Google Ads · current</small>
                       </TableHead>
                       {[
                         {
@@ -717,107 +775,150 @@ export default function Dashboard() {
                   </TableHeader>
                   <TableBody>
                     {rows.map((s, i) => (
-                      <TableRow key={s.id}>
-                        <TableCell>
-                          <button
-                            className="store-cell"
-                            onClick={() => setSelected(s)}
-                          >
-                            <span className={`store-avatar tone-${i % 5}`}>
-                              {s.name.slice(0, 1)}
-                            </span>
-                            <span>
-                              <strong>{s.name}</strong>
-                              <small>
-                                <span
-                                  className="login-dot"
-                                  style={{
-                                    background: [
-                                      "#8b7ef8",
-                                      "#59b9a3",
-                                      "#eba869",
-                                    ][s.group % 3],
-                                  }}
-                                />
-                                {s.cid.replace(
-                                  /(\d{3})(\d{3})(\d{4})/,
-                                  "$1-$2-$3",
-                                )}
-                              </small>
-                            </span>
-                          </button>
-                        </TableCell>
-                        <TableCell>
-                          {s.ads?.budgets.length === 1 ? (
-                            <>
-                              <span className="numeric">
-                                {formatMoney(
-                                  s.ads.budgets[0].amount,
-                                  s.ads.currency,
-                                )}
-                              </span>
-                              {s.ads.budgets[0].shared && (
-                                <small className="cell-sub">
-                                  Shared budget
-                                </small>
-                              )}
-                            </>
-                          ) : s.ads?.budgets.length ? (
+                      <Fragment key={s.id}>
+                        <TableRow
+                          key={s.id}
+                          className="store-navigation-row"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openStore(s);
+                          }}
+                        >
+                          <TableCell>
                             <button
-                              className="text-link"
-                              onClick={() => setSelected(s)}
+                              className="store-cell"
+                              aria-expanded={expandedStores.includes(s.id)}
+                              aria-controls={`campaigns-${s.id}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openStore(s);
+                              }}
                             >
-                              {s.ads.budgets.length} budgets
+                              <span className={`store-avatar tone-${i % 5}`}>
+                                {s.name.slice(0, 1)}
+                              </span>
+                              <span>
+                                <strong>{s.name}</strong>
+                                <small>
+                                  <span
+                                    className="login-dot"
+                                    style={{
+                                      background: [
+                                        "#8b7ef8",
+                                        "#59b9a3",
+                                        "#eba869",
+                                      ][s.group % 3],
+                                    }}
+                                  />
+                                  {s.cid.replace(
+                                    /(\d{3})(\d{3})(\d{4})/,
+                                    "$1-$2-$3",
+                                  )}
+                                </small>
+                              </span>
                             </button>
-                          ) : (
-                            "—"
-                          )}
-                        </TableCell>
-                        <TableCell className="numeric">
-                          {formatMoney(s.ads?.spend, s.ads?.currency)}
-                        </TableCell>
-                        <TableCell className="numeric">
-                          {count(s.shop?.orders)}
-                        </TableCell>
-                        <TableCell className="numeric">
-                          {count(s.ads?.purchases)}
-                        </TableCell>
-                        <TableCell className="numeric" title={s.ads?.costNote}>
-                          {formatMoney(s.ads?.costPerPurchase, s.ads?.currency)}
-                        </TableCell>
-                        <TableCell>
-                          <span
-                            className={`row-status ${s.adsError || s.shopError ? "needs-attention" : ""}`}
+                          </TableCell>
+                          <TableCell>
+                            {s.ads?.budgets.length ? (
+                              <>
+                                <span className="numeric">
+                                  {formatMoney(
+                                    s.ads.budgets.every((b) => b.amount != null)
+                                      ? s.ads.budgets.reduce(
+                                          (total, budget) =>
+                                            total + (budget.amount || 0),
+                                          0,
+                                        )
+                                      : null,
+                                    s.ads.currency,
+                                  )}
+                                </span>
+                                <small className="cell-sub">
+                                  {s.ads.budgets.length} budget
+                                  {s.ads.budgets.length === 1 ? "" : "s"}
+                                  {s.ads.budgets.some((budget) => budget.shared)
+                                    ? " · shared budgets counted once · per day"
+                                    : s.ads.budgets.some(
+                                          (budget) => budget.amount == null,
+                                        )
+                                      ? " · includes non-daily budgets"
+                                      : " · per day"}
+                                </small>
+                              </>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell className="numeric">
+                            {formatMoney(s.ads?.spend, s.ads?.currency)}
+                          </TableCell>
+                          <TableCell className="numeric">
+                            {count(s.shop?.orders)}
+                          </TableCell>
+                          <TableCell className="numeric">
+                            {count(s.ads?.purchases)}
+                          </TableCell>
+                          <TableCell
+                            className="numeric"
+                            title={s.ads?.costNote}
                           >
-                            <Dot
-                              good={
-                                !!s.ads &&
-                                !!s.shop &&
-                                !s.adsError &&
-                                !s.shopError &&
-                                !stale(s)
-                              }
-                            />
-                            {s.adsError || s.shopError
-                              ? "Check connection"
-                              : stale(s)
-                                ? "Out of date"
-                                : s.ads && s.shop
-                                  ? "Synced"
-                                  : "Pending"}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={`View ${s.name}`}
-                            onClick={() => setSelected(s)}
-                          >
-                            <ChevronRight size={15} />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
+                            {formatMoney(
+                              s.ads?.costPerPurchase,
+                              s.ads?.currency,
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <span
+                              className={`row-status ${s.ads?.alerts?.length || s.adsError || s.shopError ? "needs-attention" : ""}`}
+                            >
+                              <Dot
+                                good={
+                                  !!s.ads &&
+                                  !!s.shop &&
+                                  !s.ads.alerts?.length &&
+                                  !s.adsError &&
+                                  !s.shopError &&
+                                  !stale(s)
+                                }
+                              />
+                              {s.ads?.alerts?.length
+                                ? "Policy alert"
+                                : s.adsError || s.shopError
+                                  ? "Check connection"
+                                  : stale(s)
+                                    ? "Out of date"
+                                    : s.ads && s.shop
+                                      ? "Synced"
+                                      : "Pending"}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Edit ${s.name}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setSelected(s);
+                              }}
+                            >
+                              Edit
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                        {expandedStores.includes(s.id) && (
+                          <TableRow>
+                            <TableCell
+                              colSpan={8}
+                              className="inline-store-cell"
+                            >
+                              <div id={`campaigns-${s.id}`}>
+                                <InlineStoreCampaigns store={s} demo={demo} />
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
                     ))}
                   </TableBody>
                 </Table>
@@ -1260,133 +1361,92 @@ export default function Dashboard() {
                   {selected.domain} · {accountLabel(selected.group)}
                 </SheetDescription>
               </SheetHeader>
-              <div className="sheet-body">
-                <div className="detail-id">
-                  CID <strong>{selected.cid}</strong>
-                  {!demo && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setEdit(selected);
-                        setSelected(null);
-                        setAddOpen(true);
-                      }}
-                    >
-                      Edit connection
-                    </Button>
-                  )}
-                </div>
-                <div className="detail-metrics">
-                  <div>
-                    <small>Shopify orders</small>
-                    <strong>{count(selected.shop?.orders)}</strong>
-                  </div>
-                  <div>
-                    <small>Google Ads spend</small>
-                    <strong>
-                      {formatMoney(selected.ads?.spend, selected.ads?.currency)}
-                    </strong>
-                  </div>
-                </div>
-                {[selected.adsError, selected.shopError]
-                  .filter(Boolean)
-                  .map((e, i) => (
-                    <p className="form-error" key={i}>
-                      {e}
-                    </p>
-                  ))}
-                <StoreProducts
-                  key={`${selected.id}:${from}:${to}`}
-                  store={selected}
-                  demo={demo}
-                  from={from}
-                  to={to}
-                />
-                <h3>Current daily budgets</h3>
-                <p className="muted">
-                  Fetched with the report. These may differ from the budget that
-                  applied on the selected day.
-                </p>
-                {selected.ads?.budgets.length ? (
-                  selected.ads.budgets.map((b) => (
-                    <div className="budget-row" key={b.id}>
-                      <div>
-                        <strong>{b.name}</strong>
-                        <small>{b.campaigns.join(" · ")}</small>
-                        {b.shared && (
-                          <span className="subtle-tag">
-                            Shared · shown once
-                          </span>
-                        )}
-                      </div>
-                      <strong>
-                        {b.period === "DAILY"
-                          ? formatMoney(b.amount, selected.ads?.currency)
-                          : "Non-daily budget"}
-                      </strong>
-                    </div>
-                  ))
-                ) : (
-                  <p className="muted">
-                    Budgets appear after the first successful Google Ads sync.
-                  </p>
-                )}
-                <h3>Source details</h3>
-                {[
-                  { title: "Google Ads", r: selected.ads },
-                  { title: "Shopify", r: selected.shop },
-                ].map(({ title, r }) => (
-                  <div className="source-detail" key={title}>
-                    <strong>{title}</strong>
-                    <span>
-                      {r ? `${r.currency} · ${r.timezone}` : "Not synced"}
-                    </span>
-                    <small>
-                      Report date: {r?.date || "—"} · Updated:{" "}
-                      <Time value={r?.fetchedAt} />
-                    </small>
-                  </div>
-                ))}
-                {selected.ads &&
-                  selected.shop &&
-                  (selected.ads.currency !== selected.shop.currency ||
-                    selected.ads.timezone !== selected.shop.timezone) && (
-                    <p className="form-error">
-                      These sources use different currencies or time zones.
-                      Figures are shown unchanged.
-                    </p>
-                  )}
-                <p className="detail-note">
-                  <Info size={15} />
-                  {selected.ads?.costNote ||
-                    "Cost per purchase is shown only when available as a purchase-only source metric."}
-                </p>
-                {!demo && (
-                  <div className="external-links">
-                    <a
-                      href={`https://ads.google.com/aw/overview`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Google Ads
-                      <ArrowUpRight size={13} />
-                    </a>
-                    <a
-                      href={`https://${selected.domain}/admin`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Shopify admin
-                      <ArrowUpRight size={13} />
-                    </a>
-                  </div>
-                )}
-              </div>
+              <StoreDetails
+                selected={selected}
+                demo={demo}
+                from={from}
+                to={to}
+                onEdit={() => {
+                  setEdit(selected);
+                  setSelected(null);
+                  setAddOpen(true);
+                }}
+              />
             </>
           )}
         </SheetContent>
       </Sheet>
+      <Dialog
+        open={exportOpen}
+        onOpenChange={(open) => {
+          if (!exporting) setExportOpen(open);
+        }}
+      >
+        <DialogContent className="setup-dialog" showCloseButton={!exporting}>
+          <DialogTitle>Export report</DialogTitle>
+          <DialogDescription>
+            Choose how many days to include. The CSV includes all stores and
+            Google accounts.
+          </DialogDescription>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void exportReport();
+            }}
+            className="grid gap-4"
+          >
+            <label className="grid gap-2">
+              How many days?
+              <input
+                className="rounded-md border px-3 py-2"
+                type="number"
+                min="1"
+                max="366"
+                step="1"
+                required
+                value={exportDays}
+                onChange={(event) => setExportDays(event.target.value)}
+                disabled={exporting}
+              />
+            </label>
+            <label className="grid gap-2">
+              End date
+              <input
+                className="rounded-md border px-3 py-2"
+                type="date"
+                required
+                max={dateInZone("Asia/Kolkata")}
+                value={exportEnd}
+                onChange={(event) => setExportEnd(event.target.value)}
+                disabled={exporting}
+              />
+            </label>
+            <p className="text-sm text-muted-foreground">
+              Includes the end date. Dates use India time. Reports are prepared
+              automatically if needed.
+            </p>
+            {exportError && <p role="alert">{exportError}</p>}
+            {exporting && (
+              <p role="status">
+                Preparing your report. This may take a couple of minutes.
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={exporting}
+                onClick={() => setExportOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={exporting}>
+                {exporting ? "Preparing…" : "Download CSV"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </SidebarProvider>
   );
 }

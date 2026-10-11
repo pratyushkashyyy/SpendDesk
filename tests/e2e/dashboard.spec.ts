@@ -83,6 +83,7 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
           name: "QA Shopping",
           status: "ENABLED",
           spend: 500,
+          targetCpa: null,
           budgetId: "shared",
         },
       ],
@@ -130,6 +131,7 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
           name: "QA Shopping",
           status: "ENABLED",
           channel: "SHOPPING",
+          targetCpa: null,
           budgetId: "shared",
           budget: 1000,
           budgetPeriod: "DAILY",
@@ -140,6 +142,7 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
           conversions: 2,
         },
       ],
+      campaignDaily: [],
       performance: [
         {
           itemId: "shopify_IN_9001_9002",
@@ -215,16 +218,153 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
     expect(exportedText).toContain(value);
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export report" }).click();
+  const exportDialog = page.getByRole("dialog", { name: "Export report" });
+  await expect(exportDialog).toBeVisible();
+  await exportDialog.getByLabel("How many days?").fill("1");
+  await exportDialog.getByLabel("End date").fill(yesterday);
+  await exportDialog.getByRole("button", { name: "Download CSV" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe(
     `spenddesk-${yesterday}-${yesterday}.csv`,
   );
-  await page.getByRole("button", { name: "2 budgets" }).click();
+  // A new range triggers preparation and downloads without changing the overview.
+  const exportStart = dateInZone("Asia/Kolkata", -7);
+  let exportRequests = 0;
+  await page.route(
+    `**/api/export?from=${exportStart}&to=${yesterday}`,
+    (route) => {
+      exportRequests++;
+      return exportRequests === 1
+        ? route.fulfill({ status: 409, json: { error: "Not ready" } })
+        : route.fulfill({ contentType: "text/csv", body: exportedText });
+    },
+  );
+  await page.route("**/api/sync", async (route) => {
+    expect(route.request().postDataJSON()).toEqual({
+      from: exportStart,
+      to: yesterday,
+    });
+    await route.fulfill({ status: 202, json: { ok: true } });
+  });
+  await page.getByRole("button", { name: "Export report" }).click();
+  await exportDialog.getByLabel("How many days?").fill("7");
+  const rangeDownloadPromise = page.waitForEvent("download");
+  await exportDialog.getByRole("button", { name: "Download CSV" }).click();
+  await expect(
+    exportDialog.getByRole("button", { name: "Preparing…" }),
+  ).toBeDisabled();
+  expect((await rangeDownloadPromise).suggestedFilename()).toBe(
+    `spenddesk-${exportStart}-${yesterday}.csv`,
+  );
+  expect(exportRequests).toBe(2);
+  await page.unroute("**/api/sync");
+  await page
+    .getByRole("button", { name: "Edit Local QA Store", exact: true })
+    .click();
   const sheet = page.getByRole("dialog");
   await expect(sheet.getByText("QA Shared", { exact: true })).toHaveCount(1);
   await expect(sheet.getByText("Shared · shown once")).toBeVisible();
   await expect(sheet.getByText("INR · Asia/Kolkata").first()).toBeVisible();
+  await sheet.locator("summary").filter({ hasText: "QA Product" }).click();
+  await expect(sheet.getByLabel("Assign campaign to QA Product")).toBeVisible();
+  await expect(
+    sheet.getByRole("button", { name: "Remove QA Shopping from QA Product" }),
+  ).toBeVisible();
   await sheet.getByRole("button", { name: "Close", exact: true }).click();
+  const performanceFixture = await (
+    await page.request.get(
+      `/api/store-products?id=${store.id}&from=${yesterday}&to=${yesterday}`,
+    )
+  ).json();
+  const sevenStart = dateInZone("Asia/Kolkata", -6);
+  const sevenEnd = dateInZone("Asia/Kolkata");
+  await page.route(
+    `**/api/store-products?id=${store.id}&from=${sevenStart}&to=${sevenEnd}`,
+    (route) =>
+      route.fulfill({
+        json: {
+          ...performanceFixture,
+          date: `${sevenStart} – ${sevenEnd}`,
+          campaignDaily: [
+            {
+              campaignId: "1",
+              date: sevenEnd,
+              spend: 123,
+              clicks: 9,
+              impressions: 80,
+              conversions: 2,
+            },
+          ],
+        },
+      }),
+  );
+  const overviewUrl = page.url();
+  await page
+    .getByRole("button", { name: /Local QA Store/ })
+    .first()
+    .click();
+  const inline = page.getByRole("region", {
+    name: "Local QA Store campaign performance",
+  });
+  await expect(inline).toBeVisible();
+  await expect(page).toHaveURL(overviewUrl);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(inline.getByText("Last 7 days", { exact: true })).toBeVisible();
+  await expect(
+    inline.getByRole("tab", { name: /All campaigns/ }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(inline.getByText("QA Shopping", { exact: true })).toBeVisible();
+  await expect(
+    inline.getByText("Campaign spend", { exact: false }),
+  ).toBeVisible();
+  await inline
+    .getByRole("button", { name: "QA Shopping", exact: true })
+    .click();
+  const daily = inline.getByRole("region", {
+    name: "QA Shopping daily performance",
+  });
+  await expect(daily).toBeVisible();
+  await expect(daily.getByText("Last 7 days", { exact: true })).toBeVisible();
+  await expect(daily.locator("tbody tr")).toHaveCount(7);
+  await expect(daily.locator("tbody tr").first()).toContainText("123");
+  await expect(daily.locator("tbody tr").nth(1)).toContainText("—");
+  await daily.getByLabel("Choose report date range").click();
+  await page.getByRole("button", { name: "Yesterday", exact: true }).click();
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(daily.locator("tbody tr")).toHaveCount(1);
+  await expect(
+    inline
+      .locator(":scope > .products-heading")
+      .getByText("Last 7 days", { exact: true }),
+  ).toBeVisible();
+  await inline
+    .getByRole("button", { name: "QA Shopping", exact: true })
+    .click();
+  await expect(daily).toHaveCount(0);
+  await inline.getByLabel("Choose report date range").click();
+  await page.getByRole("button", { name: "Yesterday", exact: true }).click();
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(
+    inline
+      .getByLabel("Choose report date range")
+      .getByText("Yesterday", { exact: true }),
+  ).toBeVisible();
+  await inline.getByRole("tab", { name: /Products/ }).click();
+  await inline.locator("summary").filter({ hasText: "QA Product" }).click();
+  await expect(inline.getByLabel("Assign campaign to QA Product")).toHaveCount(
+    0,
+  );
+  await expect(
+    inline.getByRole("button", { name: "Remove QA Shopping from QA Product" }),
+  ).toHaveCount(0);
+  await expect(
+    inline.getByText("Reported product link", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: /Local QA Store/ })
+    .first()
+    .click();
+  await expect(inline).toHaveCount(0);
   await page.getByLabel("Search stores or CIDs").fill("missing-store");
   await expect(
     page.getByRole("heading", { name: "No matching stores" }),
@@ -323,7 +463,7 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
   await page.getByRole("button", { name: "Overview", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: "outputs/local-mobile.png", fullPage: true });
-  await page.getByRole("button", { name: "Toggle Sidebar" }).click();
+  await page.getByRole("button", { name: "Toggle sidebar" }).click();
   await page.getByRole("button", { name: "Setup guide", exact: true }).click();
   await page.keyboard.press("Escape");
   await expect(
@@ -343,15 +483,18 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
   await page.getByRole("button", { name: "Preview with example data" }).click();
   await expect(page.getByText("You’re viewing example data")).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "View Crafted Goods" }),
+    page.getByRole("button", { name: "Edit Crafted Goods" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "View Crafted Goods" }).click();
+  await page.getByRole("button", { name: "Edit Crafted Goods" }).click();
   const exampleSheet = page.getByRole("dialog");
   await expect(
     exampleSheet.getByRole("heading", { name: "Products & campaigns" }),
   ).toBeVisible();
   await expect(exampleSheet.getByText("Everyday essentials")).toBeVisible();
-  await exampleSheet.getByText("Everyday essentials").click();
+  await exampleSheet
+    .locator("summary")
+    .filter({ hasText: "Everyday essentials" })
+    .click();
   await expect(
     exampleSheet.getByText("Reported product link").first(),
   ).toBeVisible();
@@ -364,10 +507,10 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
     .click();
   await page.getByLabel("Search stores or CIDs").fill("Oak");
   await expect(
-    page.getByRole("button", { name: "View Oak & Linen" }),
+    page.getByRole("button", { name: "Edit Oak & Linen" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "View Crafted Goods" }),
+    page.getByRole("button", { name: "Edit Crafted Goods" }),
   ).toHaveCount(0);
   await page.getByLabel("Clear search").click();
   await page.getByRole("button", { name: "Back to live data" }).click();

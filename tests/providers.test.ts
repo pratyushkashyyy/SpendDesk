@@ -109,6 +109,7 @@ test("Google report keeps source values, deduplicates shared budgets, and refuse
           },
         },
       ];
+    else if (query.includes("policy_summary")) results = [];
     else
       results = ["One", "Two"].map((name, i) => ({
         campaign: { id: String(i), name, status: "ENABLED" },
