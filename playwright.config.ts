@@ -21,7 +21,8 @@ await testDb.unsafe(
   readFileSync("db/migrations/003_store_products.sql", "utf8"),
 );
 await testDb.unsafe(readFileSync("db/migrations/004_date_ranges.sql", "utf8"));
-await testDb`TRUNCATE product_campaign_links,store_product_snapshots,report_ranges,reports,stores,google_connections,settings,oauth_states,auth_attempts`;
+await testDb.unsafe(readFileSync("db/migrations/005_export_jobs.sql", "utf8"));
+await testDb`TRUNCATE export_jobs, product_campaign_links,store_product_snapshots,report_ranges,reports,stores,google_connections,settings,oauth_states,auth_attempts`;
 await testDb.end();
 export default defineConfig({
   testDir: "./tests/e2e",

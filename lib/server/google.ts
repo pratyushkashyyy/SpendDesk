@@ -8,15 +8,15 @@ export type GoogleConfig = {
   clientSecret: string;
   developerToken?: string;
 };
-export async function googleConfig() {
-  const raw = await getSetting("google_config");
+export async function googleConfig(sql = db()) {
+  const raw = await getSetting("google_config", sql);
   if (!raw) throw new Error("Finish Google Ads API setup in Connections.");
   return decrypt<GoogleConfig>(raw);
 }
-export async function googleAccess(group: number) {
-  const config = await googleConfig();
+export async function googleAccess(group: number, sql = db()) {
+  const config = await googleConfig(sql);
   const rows =
-    await db()`SELECT token_cipher FROM google_connections WHERE group_id=${group}`;
+    await sql`SELECT token_cipher FROM google_connections WHERE group_id=${group}`;
   if (!rows.length) throw new Error(`Connect Google login ${group} first.`);
   const { refreshToken } = decrypt<{ refreshToken: string }>(
     rows[0].token_cipher,

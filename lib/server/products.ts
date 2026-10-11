@@ -1,3 +1,4 @@
+import { db } from "./db";
 import { decrypt } from "./crypto";
 import { adsQuery, googleAccess } from "./google";
 import { shopAccess, shopGraphql, type ShopCredentials } from "./shopify";
@@ -84,8 +85,9 @@ export async function fetchProductAds(
   store: { cid: string; manager_cid: string; group_id: number },
   startDate: string,
   endDate = startDate,
+  sql = db(),
 ) {
-  const auth = await googleAccess(store.group_id);
+  const auth = await googleAccess(store.group_id, sql);
   const query = (q: string) => adsQuery(store.cid, store.manager_cid, auth, q);
   const fields =
     "campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign.bidding_strategy_type, campaign.target_cpa.target_cpa_micros, campaign.maximize_conversions.target_cpa_micros, bidding_strategy.target_cpa.target_cpa_micros, campaign_budget.id, campaign_budget.amount_micros, campaign_budget.period, campaign_budget.explicitly_shared";

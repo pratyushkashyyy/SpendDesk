@@ -33,15 +33,16 @@ export async function syncReports(
       await connection`SELECT pg_try_advisory_lock(734052) AS acquired`;
     acquired = lock.acquired;
     if (!acquired) return { busy: true, synced: 0, errors: 0 };
-    await putSetting("sync_status", JSON.stringify(status));
-    const savedStores = await db()`SELECT * FROM stores ORDER BY group_id,name`;
+    await putSetting("sync_status", JSON.stringify(status), connection);
+    const savedStores =
+      await connection`SELECT * FROM stores ORDER BY group_id,name`;
     let stores = [...savedStores];
     const existing = new Set<string>();
     if (missingOnly && customDate) {
       const saved =
         endDate && endDate !== customDate
-          ? await db()`SELECT store_id,source FROM report_ranges WHERE start_date=${customDate}::date AND end_date=${endDate}::date`
-          : await db()`SELECT store_id,source FROM reports WHERE report_date=${customDate}::date`;
+          ? await connection`SELECT store_id,source FROM report_ranges WHERE start_date=${customDate}::date AND end_date=${endDate}::date`
+          : await connection`SELECT store_id,source FROM reports WHERE report_date=${customDate}::date`;
       for (const row of saved) existing.add(`${row.store_id}:${row.source}`);
       stores = stores.filter(
         (store) =>
@@ -55,7 +56,7 @@ export async function syncReports(
     >();
     for (const group of new Set(stores.map((s) => s.group_id as number)))
       try {
-        tokens.set(group, await googleAccess(group));
+        tokens.set(group, await googleAccess(group, connection));
       } catch (e) {
         tokens.set(group, e as Error);
       }
@@ -68,7 +69,7 @@ export async function syncReports(
         )
           continue;
         const previous =
-          await db()`SELECT payload FROM reports WHERE store_id=${store.id} AND source=${source} AND payload IS NOT NULL ORDER BY checked_at DESC LIMIT 1`;
+          await connection`SELECT payload FROM reports WHERE store_id=${store.id} AND source=${source} AND payload IS NOT NULL ORDER BY checked_at DESC LIMIT 1`;
         const timezone = previous[0]?.payload?.timezone || "Asia/Kolkata";
         for (const offset of customDate ? [0] : [-1, 0, -2, -3]) {
           let reportDate = customDate || dateInZone(timezone, offset);
@@ -87,20 +88,20 @@ export async function syncReports(
                 : await fetchShop(store as any, offset, customDate, endDate);
             reportDate = data.date;
             if (customDate && endDate && customDate !== endDate)
-              await db()`INSERT INTO report_ranges(store_id,source,start_date,end_date,payload,error) VALUES(${store.id},${source},${customDate},${endDate},${db().json(data as any)},NULL) ON CONFLICT(store_id,source,start_date,end_date) DO UPDATE SET payload=EXCLUDED.payload,error=NULL,checked_at=now()`;
+              await connection`INSERT INTO report_ranges(store_id,source,start_date,end_date,payload,error) VALUES(${store.id},${source},${customDate},${endDate},${connection.json(data as any)},NULL) ON CONFLICT(store_id,source,start_date,end_date) DO UPDATE SET payload=EXCLUDED.payload,error=NULL,checked_at=now()`;
             else
-              await db()`INSERT INTO reports(store_id,source,report_date,payload,error) VALUES(${store.id},${source},${reportDate},${db().json(data as any)},NULL) ON CONFLICT(store_id,source,report_date) DO UPDATE SET payload=EXCLUDED.payload,error=NULL,checked_at=now()`;
+              await connection`INSERT INTO reports(store_id,source,report_date,payload,error) VALUES(${store.id},${source},${reportDate},${connection.json(data as any)},NULL) ON CONFLICT(store_id,source,report_date) DO UPDATE SET payload=EXCLUDED.payload,error=NULL,checked_at=now()`;
             status.synced++;
           } catch (e) {
             const message =
               e instanceof Error ? e.message : "Sync failed. Try again.";
             if (customDate && endDate && customDate !== endDate)
-              await db()`INSERT INTO report_ranges(store_id,source,start_date,end_date,error) VALUES(${store.id},${source},${customDate},${endDate},${message}) ON CONFLICT(store_id,source,start_date,end_date) DO UPDATE SET error=EXCLUDED.error,checked_at=now()`;
+              await connection`INSERT INTO report_ranges(store_id,source,start_date,end_date,error) VALUES(${store.id},${source},${customDate},${endDate},${message}) ON CONFLICT(store_id,source,start_date,end_date) DO UPDATE SET error=EXCLUDED.error,checked_at=now()`;
             else
-              await db()`INSERT INTO reports(store_id,source,report_date,error) VALUES(${store.id},${source},${reportDate},${message}) ON CONFLICT(store_id,source,report_date) DO UPDATE SET error=EXCLUDED.error,checked_at=now()`;
+              await connection`INSERT INTO reports(store_id,source,report_date,error) VALUES(${store.id},${source},${reportDate},${message}) ON CONFLICT(store_id,source,report_date) DO UPDATE SET error=EXCLUDED.error,checked_at=now()`;
             status.errors++;
           }
-          await putSetting("sync_status", JSON.stringify(status));
+          await putSetting("sync_status", JSON.stringify(status), connection);
         }
       }
     }
@@ -113,7 +114,7 @@ export async function syncReports(
       if (acquired) {
         status.running = false;
         status.finishedAt = new Date().toISOString();
-        await putSetting("sync_status", JSON.stringify(status));
+        await putSetting("sync_status", JSON.stringify(status), connection);
         await connection`SELECT pg_advisory_unlock(734052)`;
       }
     } finally {

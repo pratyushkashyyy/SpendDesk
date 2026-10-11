@@ -10,6 +10,7 @@ try {
       "002_dynamic_google",
       "003_store_products",
       "004_date_ranges",
+      "005_export_jobs",
     ]) {
       const existing =
         await tx`SELECT name FROM schema_migrations WHERE name=${name}`;

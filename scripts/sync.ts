@@ -1,7 +1,9 @@
+import { processExportJobs } from "../lib/server/export-jobs";
 import { syncReports } from "../lib/server/sync";
 import { db, getSetting } from "../lib/server/db";
 import { refreshIntervalMinutes } from "../lib/schedule";
 try {
+  await processExportJobs();
   const interval = refreshIntervalMinutes();
   const previous = JSON.parse((await getSetting("sync_status")) || "null");
   const elapsed = previous?.finishedAt

@@ -10,10 +10,10 @@ export function db() {
     connect_timeout: 15,
   }));
 }
-export async function getSetting(key: string) {
-  const rows = await db()`SELECT value FROM settings WHERE key=${key}`;
+export async function getSetting(key: string, sql = db()) {
+  const rows = await sql`SELECT value FROM settings WHERE key=${key}`;
   return rows[0]?.value as string | undefined;
 }
-export async function putSetting(key: string, value: string) {
-  await db()`INSERT INTO settings (key,value) VALUES (${key},${value}) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`;
+export async function putSetting(key: string, value: string, sql = db()) {
+  await sql`INSERT INTO settings (key,value) VALUES (${key},${value}) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`;
 }

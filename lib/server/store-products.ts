@@ -15,7 +15,7 @@ export async function storeProducts(
   try {
     await lock`SELECT pg_advisory_lock(hashtextextended(${key},0))`;
     const [cached] =
-      await sql`SELECT payload,checked_at FROM store_product_snapshots WHERE store_id=${store.id} AND start_date=${startDate} AND end_date=${endDate}`;
+      await lock`SELECT payload,checked_at FROM store_product_snapshots WHERE store_id=${store.id} AND start_date=${startDate} AND end_date=${endDate}`;
     const previous = cached?.payload as StoreProductsData | undefined;
     let data = previous;
     const targetCpaMissing = !!data?.campaigns?.some(
@@ -24,7 +24,7 @@ export async function storeProducts(
     if (!data || !data.campaignDaily || targetCpaMissing || force) {
       const [catalog, ads] = await Promise.allSettled([
         fetchCatalog(store),
-        fetchProductAds(store, startDate, endDate),
+        fetchProductAds(store, startDate, endDate, lock),
       ]);
       data = {
         campaignDaily:
@@ -52,10 +52,10 @@ export async function storeProducts(
         adsError: ads.status === "rejected" ? ads.reason.message : null,
         fetchedAt: new Date().toISOString(),
       };
-      await sql`INSERT INTO store_product_snapshots(store_id,start_date,end_date,payload) VALUES(${store.id},${startDate},${endDate},${sql.json(data as any)}) ON CONFLICT(store_id,start_date,end_date) DO UPDATE SET payload=EXCLUDED.payload,checked_at=now()`;
+      await lock`INSERT INTO store_product_snapshots(store_id,start_date,end_date,payload) VALUES(${store.id},${startDate},${endDate},${sql.json(data as any)}) ON CONFLICT(store_id,start_date,end_date) DO UPDATE SET payload=EXCLUDED.payload,checked_at=now()`;
     }
     const links =
-      await sql`SELECT product_id,campaign_id FROM product_campaign_links WHERE store_id=${store.id}`;
+      await lock`SELECT product_id,campaign_id FROM product_campaign_links WHERE store_id=${store.id}`;
     return {
       ...data,
       links: links.map((r) => ({

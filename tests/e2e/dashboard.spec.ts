@@ -221,49 +221,59 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
     yesterday,
   ])
     expect(exportedText).toContain(value);
-  const downloadPromise = page.waitForEvent("download");
+  let downloadCount = 0;
+  page.on("download", () => downloadCount++);
   await page.getByRole("button", { name: "Export report" }).click();
   const exportDialog = page.getByRole("dialog", { name: "Export report" });
   await expect(exportDialog).toBeVisible();
   await exportDialog.getByLabel("How many days?").fill("1");
   await exportDialog.getByLabel("End date").fill(yesterday);
-  await exportDialog.getByRole("button", { name: "Download CSV" }).click();
+  await exportDialog.getByRole("button", { name: "Generate report" }).click();
+  await expect(exportDialog).not.toBeVisible();
+  const exports = page.getByRole("region", { name: "Report exports" });
+  await expect(
+    exports.getByRole("button", { name: "Download CSV" }),
+  ).toBeVisible({ timeout: 15000 });
+  expect(downloadCount).toBe(0);
+  const downloadPromise = page.waitForEvent("download");
+  await exports.getByRole("button", { name: "Download CSV" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe(
     `spenddesk-${yesterday}-${yesterday}.csv`,
   );
-  // A new range triggers preparation and downloads without changing the overview.
+  await expect(
+    exports.getByRole("button", { name: "Download CSV" }),
+  ).toHaveCount(0);
+  await expect
+    .poll(async () =>
+      Number((await sql`SELECT count(*) FROM export_jobs`)[0].count),
+    )
+    .toBe(0);
+  // A background export survives reload and is removed after downloading.
   const exportStart = dateInZone("Asia/Kolkata", -7);
-  let exportRequests = 0;
-  await page.route(
-    `**/api/export?from=${exportStart}&to=${yesterday}`,
-    (route) => {
-      exportRequests++;
-      return exportRequests === 1
-        ? route.fulfill({ status: 409, json: { error: "Not ready" } })
-        : route.fulfill({ contentType: "text/csv", body: exportedText });
-    },
-  );
-  await page.route("**/api/sync", async (route) => {
-    expect(route.request().postDataJSON()).toEqual({
-      from: exportStart,
-      to: yesterday,
-      missingOnly: true,
-    });
-    await route.fulfill({ status: 202, json: { ok: true } });
-  });
+  await sql`INSERT INTO report_ranges(store_id,source,start_date,end_date,payload) SELECT store_id,source,${exportStart}::date,${yesterday}::date,payload FROM reports WHERE report_date=${yesterday}::date`;
+  await sql`INSERT INTO store_product_snapshots(store_id,start_date,end_date,payload) SELECT store_id,${exportStart}::date,${yesterday}::date,payload FROM store_product_snapshots WHERE start_date=${yesterday}::date AND end_date=${yesterday}::date`;
   await page.getByRole("button", { name: "Export report" }).click();
   await exportDialog.getByLabel("How many days?").fill("7");
-  const rangeDownloadPromise = page.waitForEvent("download");
-  await exportDialog.getByRole("button", { name: "Download CSV" }).click();
+  await exportDialog.getByRole("button", { name: "Generate report" }).click();
+  await expect(exportDialog).not.toBeVisible();
+  await page.reload();
   await expect(
-    exportDialog.getByRole("button", { name: "Preparing…" }),
-  ).toBeDisabled();
+    exports.getByRole("button", { name: "Download CSV" }),
+  ).toBeVisible({ timeout: 15000 });
+  const rangeDownloadPromise = page.waitForEvent("download");
+  await exports.getByRole("button", { name: "Download CSV" }).click();
   expect((await rangeDownloadPromise).suggestedFilename()).toBe(
     `spenddesk-${exportStart}-${yesterday}.csv`,
   );
-  expect(exportRequests).toBe(2);
-  await page.unroute("**/api/sync");
+  await expect(
+    exports.getByRole("button", { name: "Download CSV" }),
+  ).toHaveCount(0);
+  await expect
+    .poll(async () =>
+      Number((await sql`SELECT count(*) FROM export_jobs`)[0].count),
+    )
+    .toBe(0);
   await page
     .getByRole("button", { name: "Edit Local QA Store", exact: true })
     .click();

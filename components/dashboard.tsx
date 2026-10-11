@@ -75,6 +75,7 @@ import {
   SidebarTrigger,
   SidebarInset,
 } from "@/components/ui/sidebar";
+import ExportReports from "@/components/export-reports";
 import StoreDetails from "@/components/store-details";
 import InlineStoreCampaigns from "@/components/inline-store-campaigns";
 import DateRangeFilter from "@/components/date-range-filter";
@@ -146,6 +147,7 @@ export default function Dashboard() {
     [edit, setEdit] = useState<Store | null>(null),
     [addOpen, setAddOpen] = useState(false),
     [apiOpen, setApiOpen] = useState(false);
+  const [exportRefreshKey, setExportRefreshKey] = useState(0);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportDays, setExportDays] = useState("7");
   const [exportEnd, setExportEnd] = useState(() =>
@@ -159,6 +161,7 @@ export default function Dashboard() {
       try {
         const res = await fetch(
           `/api/dashboard?from=${requestedFrom}&to=${requestedTo}`,
+          { signal: AbortSignal.timeout(20000) },
         );
         if (res.status === 401) {
           window.location.assign("/login");
@@ -298,43 +301,22 @@ export default function Dashboard() {
     setExportError("");
     setExporting(true);
     try {
-      let response = await fetch(`/api/export?from=${from}&to=${to}`);
-      if (response.status === 409) {
-        const sync = await fetch("/api/sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ from, to, missingOnly: true }),
-        });
-        if (!sync.ok)
-          throw new Error(
-            (await sync.json()).error || "Unable to prepare report.",
-          );
-        const deadline = Date.now() + 120000;
-        while (response.status === 409 && Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          response = await fetch(`/api/export?from=${from}&to=${to}`);
-        }
-      }
+      const response = await fetch("/api/exports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from, to }),
+        signal: AbortSignal.timeout(20000),
+      });
       if (response.status === 401) {
         window.location.assign("/login");
         return;
       }
-      if (!response.ok) {
-        const body = await response.json();
-        throw new Error(body.error);
-      }
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `spenddesk-${from}-${to}.csv`;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error);
       setExportOpen(false);
+      setExportRefreshKey((key) => key + 1);
       setNotice(
-        `Exported all account data for ${from === to ? from : `${from} to ${to}`}.`,
+        "Report queued. You can keep using the dashboard; a Download CSV button will appear when it is ready.",
       );
     } catch (error) {
       setExportError((error as Error).message);
@@ -520,6 +502,7 @@ export default function Dashboard() {
                   : "Refresh data"}
             </Button>
           </div>
+          {!demo && <ExportReports refreshKey={exportRefreshKey} />}
           {notice && (
             <div className="notice" role="status">
               <Info size={16} />
@@ -1430,11 +1413,7 @@ export default function Dashboard() {
               automatically if needed.
             </p>
             {exportError && <p role="alert">{exportError}</p>}
-            {exporting && (
-              <p role="status">
-                Preparing your report. This may take a couple of minutes.
-              </p>
-            )}
+            {exporting && <p role="status">Queueing your report…</p>}
             <div className="flex justify-end gap-2">
               <Button
                 type="button"
@@ -1445,7 +1424,7 @@ export default function Dashboard() {
                 Cancel
               </Button>
               <Button type="submit" disabled={exporting}>
-                {exporting ? "Preparing…" : "Download CSV"}
+                {exporting ? "Queueing…" : "Generate report"}
               </Button>
             </div>
           </form>
