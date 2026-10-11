@@ -445,6 +445,7 @@ export default function Dashboard() {
           </div>
           <button
             className="profile"
+            aria-label="Sign out"
             onClick={async () => {
               await fetch("/api/auth/logout", { method: "POST" });
               window.location.assign("/login");
@@ -461,6 +462,10 @@ export default function Dashboard() {
       </Sidebar>
       <SidebarInset className="app-main">
         <header className="topbar">
+          <SidebarTrigger
+            label="Sidebar"
+            className="sidebar-toggle md:hidden"
+          />
           <div className="breadcrumbs">
             <span>Workspace</span>
             <ChevronRight size={13} />

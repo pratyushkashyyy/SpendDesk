@@ -3,10 +3,12 @@ import { useEffect, useState } from "react";
 import { LayoutGrid, ArrowRight, LockKeyhole } from "lucide-react";
 import { Button } from "@/components/ui/button";
 export default function SignIn({ setup = false }: { setup?: boolean }) {
+  const [ready, setReady] = useState(false);
   const [token, setToken] = useState(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   useEffect(() => {
+    setReady(true);
     if (setup) {
       const fragment = window.location.hash.slice(1);
       if (fragment) setToken(fragment);
@@ -52,10 +54,11 @@ export default function SignIn({ setup = false }: { setup?: boolean }) {
             ? "Choose a password to secure your stores and reporting."
             : "Sign in to review your stores, all in one place."}
         </p>
-        <form onSubmit={submit}>
+        <form method="post" onSubmit={submit}>
           <label>
             Dashboard password
             <input
+              disabled={!ready}
               name="password"
               type="password"
               autoComplete={setup ? "new-password" : "current-password"}
@@ -77,7 +80,11 @@ export default function SignIn({ setup = false }: { setup?: boolean }) {
               {error}
             </p>
           )}
-          <Button size="lg" disabled={busy || (setup && !token)} type="submit">
+          <Button
+            size="lg"
+            disabled={!ready || busy || (setup && !token)}
+            type="submit"
+          >
             {busy ? "One moment…" : setup ? "Create my workspace" : "Sign in"}
             <ArrowRight size={16} />
           </Button>

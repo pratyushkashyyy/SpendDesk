@@ -470,7 +470,7 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
     page.getByRole("heading", { name: "Let’s connect your stores" }),
   ).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.getByRole("button", { name: "My dashboard Sign out" }).click();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page).toHaveURL(/\/login$/);
   await page.getByLabel("Dashboard password").fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
