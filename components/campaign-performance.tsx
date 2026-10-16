@@ -106,8 +106,6 @@ export default function CampaignPerformance({
                 <tr>
                   <th>Date</th>
                   <th>Spend</th>
-                  <th>Clicks</th>
-                  <th>Impressions</th>
                   <th>Conversions</th>
                 </tr>
               </thead>
@@ -119,14 +117,6 @@ export default function CampaignPerformance({
                           campaign.spend == null
                             ? null
                             : campaign.spend / days.length,
-                        clicks:
-                          campaign.clicks == null
-                            ? null
-                            : campaign.clicks / days.length,
-                        impressions:
-                          campaign.impressions == null
-                            ? null
-                            : campaign.impressions / days.length,
                         conversions:
                           campaign.conversions == null
                             ? null
@@ -139,8 +129,6 @@ export default function CampaignPerformance({
                       <td>
                         {formatMoney(row?.spend, data?.currency || currency)}
                       </td>
-                      <td>{count(row?.clicks)}</td>
-                      <td>{count(row?.impressions)}</td>
                       <td>{count(row?.conversions)}</td>
                     </tr>
                   );

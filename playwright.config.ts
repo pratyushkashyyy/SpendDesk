@@ -22,7 +22,20 @@ await testDb.unsafe(
 );
 await testDb.unsafe(readFileSync("db/migrations/004_date_ranges.sql", "utf8"));
 await testDb.unsafe(readFileSync("db/migrations/005_export_jobs.sql", "utf8"));
-await testDb`TRUNCATE export_jobs, product_campaign_links,store_product_snapshots,report_ranges,reports,stores,google_connections,settings,oauth_states,auth_attempts`;
+await testDb.unsafe(readFileSync("db/migrations/006_mcp_oauth.sql", "utf8"));
+await testDb.unsafe(
+  readFileSync("db/migrations/007_google_ads_quota.sql", "utf8"),
+);
+await testDb.unsafe(
+  readFileSync("db/migrations/008_report_observations.sql", "utf8"),
+);
+await testDb.unsafe(
+  readFileSync("db/migrations/009_budget_history.sql", "utf8"),
+);
+await testDb.unsafe(
+  readFileSync("db/migrations/010_campaign_activity.sql", "utf8"),
+);
+await testDb`TRUNCATE google_budget_events,budget_observed_changes,budget_states,google_ads_operations,google_ads_quota_state,report_observations,mcp_oauth,export_jobs, product_campaign_links,store_product_snapshots,report_ranges,reports,stores,google_connections,settings,oauth_states,auth_attempts`;
 await testDb.end();
 export default defineConfig({
   testDir: "./tests/e2e",

@@ -1,3 +1,4 @@
+import { recordHealth } from "@/lib/server/connection-health";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { guard } from "@/lib/server/auth";
@@ -77,6 +78,13 @@ export async function POST(request: Request) {
         await tx`INSERT INTO stores(id,name,domain,cid,group_id,manager_cid,shop_cipher) VALUES(${randomUUID()},${input.name},${domain},${input.cid},${input.group},${input.managerCid},${cipher})`;
       });
     }
+    if (cipher)
+      await recordHealth(
+        "shop",
+        domain,
+        "unchecked",
+        "Shopify credentials updated. Refresh data to verify access.",
+      );
     return Response.json({ ok: true });
   } catch (e: any) {
     if (e instanceof z.ZodError)

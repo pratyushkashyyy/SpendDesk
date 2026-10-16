@@ -1,3 +1,4 @@
+import { healthKey } from "./connection-health";
 import { db } from "./db";
 import { encrypt } from "./crypto";
 
@@ -19,6 +20,9 @@ export async function saveGoogleConnection(
       await tx`UPDATE google_connections SET token_cipher=${cipher},updated_at=now() WHERE group_id=${existing[0].group_id}`;
     else
       await tx`INSERT INTO google_connections(email,token_cipher) VALUES(${normalized},${cipher})`;
+    const [saved] =
+      await tx`SELECT group_id FROM google_connections WHERE lower(email)=${normalized}`;
+    await tx`INSERT INTO settings(key,value) VALUES(${healthKey("google", saved.group_id)},${JSON.stringify({ status: "unchecked", message: "Google account reconnected. Refresh data to verify access.", checkedAt: new Date().toISOString() })}) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`;
     return true;
   });
 }

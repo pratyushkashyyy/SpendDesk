@@ -1,3 +1,25 @@
+export type GoogleQuotaStatus = {
+  used: number;
+  limit: number;
+  warning: boolean;
+  backgroundPaused: boolean;
+  exhausted: boolean;
+  cooldownUntil: string | null;
+  exhaustedUntil: string | null;
+  nextReleaseAt: string | null;
+  trackedSince: string | null;
+};
+export type ConnectionHealth = {
+  status:
+    | "healthy"
+    | "reauthorization_required"
+    | "attention"
+    | "rate_limited"
+    | "unchecked"
+    | "not_connected";
+  message: string;
+  checkedAt: string | null;
+};
 export type Period =
   "today" | "yesterday" | "last7" | "last30" | "monthToDate" | "custom";
 export type Budget = {
@@ -9,6 +31,7 @@ export type Budget = {
   campaigns: string[];
 };
 export type Campaign = {
+  impressions?: number | null;
   id: string;
   name: string;
   status: string;
@@ -74,6 +97,12 @@ export type StoreProductsData = {
   fetchedAt: string;
 };
 export type AdsReport = {
+  budgetEligibility?: {
+    budgetIds: string[];
+    complete: boolean;
+    from: string;
+    to: string;
+  };
   spend: number | null;
   purchases: number | null;
   costPerPurchase: number | null;
@@ -96,7 +125,69 @@ export type ShopReport = {
   date: string;
   raw: unknown;
 };
+export type OrderFlow = {
+  state:
+    | "on_pace"
+    | "ahead"
+    | "slower"
+    | "quiet"
+    | "no_baseline"
+    | "stale"
+    | "unavailable"
+    | "not_connected";
+  todayOrders: number | null;
+  yesterdayOrders: number | null;
+  percent: number | null;
+  asOf: string | null;
+  baselineAt: string | null;
+  hourlyDelta: number | null;
+};
+export type ReportPair = {
+  ads: AdsReport | null;
+  shop: ShopReport | null;
+  adsError: string | null;
+  shopError: string | null;
+};
+export type OrderObservation = {
+  date: string;
+  at: string;
+  orders: number;
+  minute: number;
+};
+export type StoreLive = {
+  orderHistory?: OrderObservation[];
+  today: ReportPair;
+  hourAgo: ReportPair;
+  orderFlow: OrderFlow;
+};
+export type BudgetChange = {
+  id: string;
+  budgetId?: string;
+  name: string;
+  previous: number | null;
+  amount: number | null;
+  changedAt: string;
+  previousAt?: string;
+  source: "google" | "observed";
+};
+export type BudgetHistory = {
+  budgets: Budget[];
+  current: number | null;
+  previous: number | null;
+  changedAt: string | null;
+  previousAt: string | null;
+  source: "google" | "observed" | null;
+  currency: string;
+  timezone: string;
+  confirmedAt: string;
+  checkedAt: string | null;
+  error: string | null;
+  changes: BudgetChange[];
+};
 export type Store = {
+  activeBudget?: import("./campaign-activity").ActiveBudget | null;
+  budgetHistory?: BudgetHistory | null;
+  live?: StoreLive;
   id: string;
   name: string;
   domain: string;
@@ -104,14 +195,28 @@ export type Store = {
   group: number;
   managerCid: string;
   shopConnected: boolean;
+  shopHealth?: ConnectionHealth;
   ads: AdsReport | null;
   shop: ShopReport | null;
   adsError: string | null;
   shopError: string | null;
 };
 export type DashboardData = {
+  googleQuota?: GoogleQuotaStatus | null;
   stores: Store[];
-  google: { group: number; email: string; connected: boolean }[];
+  google: {
+    group: number;
+    email: string;
+    connected: boolean;
+    health?: ConnectionHealth;
+  }[];
+  connectionCheck?: {
+    running: boolean;
+    checked: number;
+    errors: number;
+    startedAt: string;
+    finishedAt?: string;
+  } | null;
   configured: boolean;
   database: boolean;
   sync?: {
@@ -120,6 +225,12 @@ export type DashboardData = {
     finishedAt?: string;
     synced: number;
     errors: number;
+    deferred?: number;
+    adsPause?: {
+      reason: "background" | "exhausted" | "cooldown";
+      message: string;
+      resumeAt?: string;
+    };
     failed?: boolean;
   };
   error?: string;

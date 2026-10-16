@@ -86,8 +86,9 @@ export async function fetchProductAds(
   startDate: string,
   endDate = startDate,
   sql = db(),
+  background = true,
 ) {
-  const auth = await googleAccess(store.group_id, sql);
+  const auth = await googleAccess(store.group_id, sql, background);
   const query = (q: string) => adsQuery(store.cid, store.manager_cid, auth, q);
   const fields =
     "campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign.bidding_strategy_type, campaign.target_cpa.target_cpa_micros, campaign.maximize_conversions.target_cpa_micros, bidding_strategy.target_cpa.target_cpa_micros, campaign_budget.id, campaign_budget.amount_micros, campaign_budget.period, campaign_budget.explicitly_shared";
@@ -95,18 +96,20 @@ export async function fetchProductAds(
     startDate === endDate
       ? `segments.date = '${startDate}'`
       : `segments.date BETWEEN '${startDate}' AND '${endDate}'`;
-  const [configured, totals, performance, daily] = await Promise.all([
-    query(`SELECT ${fields} FROM campaign WHERE campaign.status != REMOVED`),
-    query(
-      `SELECT campaign.id, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM campaign WHERE ${dateFilter}`,
-    ),
-    query(
-      `SELECT campaign.id, segments.product_item_id, segments.product_title, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM shopping_performance_view WHERE ${dateFilter}`,
-    ),
-    query(
-      `SELECT campaign.id, segments.date, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM campaign WHERE ${dateFilter} ORDER BY segments.date DESC`,
-    ),
-  ]);
+  // Keep the reserved SQL connection alive until every query finishes;
+  // stop immediately on quota pauses instead of leaving queued siblings running.
+  const configured = await query(
+    `SELECT ${fields} FROM campaign WHERE campaign.status != REMOVED`,
+  );
+  const totals = await query(
+    `SELECT campaign.id, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM campaign WHERE ${dateFilter}`,
+  );
+  const performance = await query(
+    `SELECT campaign.id, segments.product_item_id, segments.product_title, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM shopping_performance_view WHERE ${dateFilter}`,
+  );
+  const daily = await query(
+    `SELECT campaign.id, segments.date, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM campaign WHERE ${dateFilter} ORDER BY segments.date DESC`,
+  );
   const campaigns: CampaignDetail[] = configured.map((r) => {
     const m = totals.find((t) => t.campaign.id === r.campaign.id)?.metrics;
     return {

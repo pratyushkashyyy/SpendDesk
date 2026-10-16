@@ -1,4 +1,5 @@
 "use client";
+import { healthLabel } from "@/lib/connection-health";
 import {
   Fragment,
   useCallback,
@@ -75,13 +76,16 @@ import {
   SidebarTrigger,
   SidebarInset,
 } from "@/components/ui/sidebar";
+import { ComparisonValue, OrderFlowIndicator } from "@/components/store-live";
 import ExportReports from "@/components/export-reports";
 import StoreDetails from "@/components/store-details";
+import BudgetHistory, { CurrentBudget } from "@/components/budget-history";
 import InlineStoreCampaigns from "@/components/inline-store-campaigns";
 import DateRangeFilter from "@/components/date-range-filter";
 import { demoStores } from "@/lib/demo";
 import { dateInZone, formatMoney, validDate } from "@/lib/reporting";
 import type { DashboardData, Store, Period } from "@/lib/types";
+import type { ReportSelection } from "@/lib/report-selection";
 const initial: DashboardData = {
   stores: [],
   google: [],
@@ -122,16 +126,20 @@ function Time({ value }: { value?: string }) {
     </>
   );
 }
-export default function Dashboard() {
+export default function Dashboard({
+  initialRange,
+}: {
+  initialRange: ReportSelection;
+}) {
   const [expandedStores, setExpandedStores] = useState<string[]>([]);
   const openStore = (s: Store) =>
     setExpandedStores((ids) =>
       ids.includes(s.id) ? ids.filter((id) => id !== s.id) : [...ids, s.id],
     );
   const [view, setView] = useState("overview"),
-    [period, setPeriod] = useState<Period>("yesterday"),
-    [from, setFrom] = useState(() => dateInZone("Asia/Kolkata", -1)),
-    [to, setTo] = useState(() => dateInZone("Asia/Kolkata", -1)),
+    [period, setPeriod] = useState<Period>(initialRange.period),
+    [from, setFrom] = useState(initialRange.from),
+    [to, setTo] = useState(initialRange.to),
     [search, setSearch] = useState(""),
     [group, setGroup] = useState("all"),
     [sort, setSort] = useState("name"),
@@ -147,6 +155,21 @@ export default function Dashboard() {
     [edit, setEdit] = useState<Store | null>(null),
     [addOpen, setAddOpen] = useState(false),
     [apiOpen, setApiOpen] = useState(false);
+  const [checkingConnections, setCheckingConnections] = useState(false);
+  async function checkAccess() {
+    setCheckingConnections(true);
+    try {
+      const res = await fetch("/api/connections/check", { method: "POST" });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error);
+      setNotice(result.message);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCheckingConnections(false);
+    }
+  }
   const [exportRefreshKey, setExportRefreshKey] = useState(0);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportDays, setExportDays] = useState("7");
@@ -187,6 +210,11 @@ export default function Dashboard() {
     return () => clearInterval(timer);
   }, [load]);
   useEffect(() => {
+    if (!data.connectionCheck?.running) return;
+    const timer = setInterval(() => load(), 2000);
+    return () => clearInterval(timer);
+  }, [data.connectionCheck?.running, load]);
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("view") === "connections") setView("connections");
     const n = params.get("notice");
@@ -207,6 +235,7 @@ export default function Dashboard() {
       old ? stores.find((s) => s.id === old.id) || null : null,
     );
   }, [stores]);
+  const showHourAgo = from === to && from === dateInZone("Asia/Kolkata");
   const connections = demo
     ? [1, 2, 3].map((group) => ({
         group,
@@ -214,6 +243,12 @@ export default function Dashboard() {
         connected: true,
       }))
     : data.google;
+  const reauthGoogle = data.google.filter(
+    (c) => c.health?.status === "reauthorization_required",
+  ).length;
+  const reauthShop = data.stores.filter(
+    (s) => s.shopHealth?.status === "reauthorization_required",
+  ).length;
   const accountLabel = (id: number) =>
     connections.find((c) => c.group === id)?.email || `Account ${id}`;
   const rows = useMemo(
@@ -515,6 +550,33 @@ export default function Dashboard() {
               </button>
             </div>
           )}
+          {!demo && data.googleQuota && (
+            <div className="sync-status-line" role="status">
+              <Info size={13} />
+              Google API: {data.googleQuota.used.toLocaleString()} /{" "}
+              {data.googleQuota.limit.toLocaleString()} operations in the last
+              24 hours
+              {data.googleQuota.exhausted
+                ? " · All Google requests paused: daily allowance exhausted."
+                : data.googleQuota.backgroundPaused
+                  ? " · Background Google sync paused at 80%; manual allowance reserved."
+                  : data.googleQuota.warning
+                    ? " · Warning: 70% of the daily budget used."
+                    : ""}
+              {data.googleQuota.cooldownUntil &&
+                !data.googleQuota.exhausted && (
+                  <>
+                    {" "}
+                    · Google requests cooling down until{" "}
+                    <Time value={data.googleQuota.cooldownUntil} />
+                  </>
+                )}
+              {data.googleQuota.trackedSince &&
+              Date.now() - Date.parse(data.googleQuota.trackedSince) < 86400000
+                ? " · Tracking started recently; earlier API usage is not included."
+                : ""}
+            </div>
+          )}
           {data.sync && (
             <div className="sync-status-line" role="status">
               <Clock3 size={13} />
@@ -522,9 +584,21 @@ export default function Dashboard() {
                 ? "Sync in progress"
                 : data.sync.failed
                   ? "Last sync failed"
-                  : "Last sync finished"}{" "}
+                  : data.sync.deferred
+                    ? "Last sync finished · Ads paused"
+                    : "Last sync finished"}{" "}
               · {data.sync.synced} source reports fetched · {data.sync.errors}{" "}
               source errors
+              {!!data.sync.deferred && (
+                <> · {data.sync.deferred} Ads reports deferred</>
+              )}
+              {data.sync.adsPause?.resumeAt && (
+                <>
+                  {" "}
+                  · Ads eligible to retry after{" "}
+                  <Time value={data.sync.adsPause.resumeAt} />
+                </>
+              )}
               {data.sync.finishedAt && (
                 <>
                   {" "}
@@ -544,34 +618,23 @@ export default function Dashboard() {
           )}
           {view === "overview" && (
             <>
-              <div className={`connection-banner ${demo ? "demo-banner" : ""}`}>
-                <div className="banner-icon">
-                  {demo ? <Info size={20} /> : <Link2 size={20} />}
+              {demo && (
+                <div className="connection-banner demo-banner">
+                  <div className="banner-icon">
+                    <Info size={20} />
+                  </div>
+                  <div>
+                    <strong>You’re viewing example data</strong>
+                    <p>
+                      These 25 stores and figures are illustrative. They are not
+                      your accounts.
+                    </p>
+                  </div>
+                  <Button variant="outline" onClick={() => setDemo(false)}>
+                    Back to live data <ArrowRight size={14} />
+                  </Button>
                 </div>
-                <div>
-                  <strong>
-                    {demo
-                      ? "You’re viewing example data"
-                      : activeCount > 0
-                        ? "Your connected stores, in sync"
-                        : "Bring your stores into one workspace"}
-                  </strong>
-                  <p>
-                    {demo
-                      ? "These 25 stores and figures are illustrative. They are not your accounts."
-                      : `${data.stores.length} stores mapped · ${data.google.length} Google accounts connected`}
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  onClick={() =>
-                    demo ? setDemo(false) : setView("connections")
-                  }
-                >
-                  {demo ? "Back to live data" : "Connect accounts"}
-                  <ArrowRight size={14} />
-                </Button>
-              </div>
+              )}
               <div className="overview-strip">
                 <div>
                   <span className="stat-icon">
@@ -634,6 +697,14 @@ export default function Dashboard() {
                       </span>
                     </h2>
                     <p>Source-reported orders and ad spend, side by side.</p>
+                    <div className="comparison-legend">
+                      <span className="comparison-primary-dot" />
+                      {showHourAgo ? "Latest saved figures" : "Selected period"}
+                      <span className="comparison-secondary-dot" />
+                      {showHourAgo
+                        ? "About 1 hour earlier below"
+                        : "Today's figures below"}
+                    </div>
                   </div>
                   <DateRangeFilter
                     period={period}
@@ -643,6 +714,16 @@ export default function Dashboard() {
                       setPeriod(nextPeriod);
                       setFrom(nextFrom);
                       setTo(nextTo);
+                      const url = new URL(window.location.href);
+                      url.searchParams.set("period", nextPeriod);
+                      if (nextPeriod === "custom") {
+                        url.searchParams.set("from", nextFrom);
+                        url.searchParams.set("to", nextTo);
+                      } else {
+                        url.searchParams.delete("from");
+                        url.searchParams.delete("to");
+                      }
+                      window.history.replaceState(null, "", url);
                     }}
                   />
                 </div>
@@ -717,7 +798,7 @@ export default function Dashboard() {
                         </button>
                       </TableHead>
                       <TableHead>
-                        Total budget<small>Google Ads · current</small>
+                        Total budget<small>Google Ads · ran in period</small>
                       </TableHead>
                       {[
                         {
@@ -754,6 +835,16 @@ export default function Dashboard() {
                           <small>{c.source}</small>
                         </TableHead>
                       ))}
+                      <TableHead
+                        className="order-flow-column"
+                        title={
+                          showHourAgo
+                            ? "Latest vs previous hour"
+                            : "Today vs yesterday · same time"
+                        }
+                      >
+                        Order flow
+                      </TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>
                         <span className="sr-only">Details</span>
@@ -806,53 +897,66 @@ export default function Dashboard() {
                             </button>
                           </TableCell>
                           <TableCell>
-                            {s.ads?.budgets.length ? (
-                              <>
-                                <span className="numeric">
-                                  {formatMoney(
-                                    s.ads.budgets.every((b) => b.amount != null)
-                                      ? s.ads.budgets.reduce(
-                                          (total, budget) =>
-                                            total + (budget.amount || 0),
-                                          0,
-                                        )
-                                      : null,
-                                    s.ads.currency,
-                                  )}
-                                </span>
-                                <small className="cell-sub">
-                                  {s.ads.budgets.length} budget
-                                  {s.ads.budgets.length === 1 ? "" : "s"}
-                                  {s.ads.budgets.some((budget) => budget.shared)
-                                    ? " · shared budgets counted once · per day"
-                                    : s.ads.budgets.some(
-                                          (budget) => budget.amount == null,
-                                        )
-                                      ? " · includes non-daily budgets"
-                                      : " · per day"}
-                                </small>
-                              </>
-                            ) : (
-                              "—"
-                            )}
+                            <CurrentBudget store={s} />
+                            <BudgetHistory store={s} />
                           </TableCell>
                           <TableCell className="numeric">
-                            {formatMoney(s.ads?.spend, s.ads?.currency)}
+                            <span className="metric-primary">
+                              {formatMoney(s.ads?.spend, s.ads?.currency)}
+                            </span>
+                            <ComparisonValue
+                              store={s}
+                              source="ads"
+                              metric="spend"
+                              hourAgo={showHourAgo}
+                            />
                           </TableCell>
                           <TableCell className="numeric">
-                            {count(s.shop?.orders)}
+                            <span className="metric-primary">
+                              {count(s.shop?.orders)}
+                            </span>
+                            <ComparisonValue
+                              store={s}
+                              source="shop"
+                              metric="orders"
+                              hourAgo={showHourAgo}
+                            />
                           </TableCell>
                           <TableCell className="numeric">
-                            {count(s.ads?.purchases)}
+                            <span className="metric-primary">
+                              {count(s.ads?.purchases)}
+                            </span>
+                            <ComparisonValue
+                              store={s}
+                              source="ads"
+                              metric="purchases"
+                              hourAgo={showHourAgo}
+                            />
                           </TableCell>
                           <TableCell
                             className="numeric"
                             title={s.ads?.costNote}
                           >
-                            {formatMoney(
-                              s.ads?.costPerPurchase,
-                              s.ads?.currency,
-                            )}
+                            <span className="metric-primary">
+                              {formatMoney(
+                                s.ads?.costPerPurchase,
+                                s.ads?.currency,
+                              )}
+                            </span>
+                            <ComparisonValue
+                              store={s}
+                              source="ads"
+                              metric="costPerPurchase"
+                              hourAgo={showHourAgo}
+                            />
+                          </TableCell>
+                          <TableCell className="order-flow-column">
+                            <OrderFlowIndicator
+                              store={s}
+                              hourAgo={showHourAgo}
+                              range={{ period, from, to }}
+                              demo={demo}
+                            />
                           </TableCell>
                           <TableCell>
                             <span
@@ -869,7 +973,7 @@ export default function Dashboard() {
                                 }
                               />
                               {s.ads?.alerts?.length
-                                ? "Policy alert"
+                                ? `Policy alert (${s.ads.alerts.length})`
                                 : s.adsError || s.shopError
                                   ? "Check connection"
                                   : stale(s)
@@ -896,11 +1000,16 @@ export default function Dashboard() {
                         {expandedStores.includes(s.id) && (
                           <TableRow>
                             <TableCell
-                              colSpan={8}
+                              colSpan={9}
                               className="inline-store-cell"
                             >
                               <div id={`campaigns-${s.id}`}>
-                                <InlineStoreCampaigns store={s} demo={demo} />
+                                <InlineStoreCampaigns
+                                  key={`${s.id}:${from}:${to}`}
+                                  store={s}
+                                  demo={demo}
+                                  initialRange={{ period, from, to }}
+                                />
                               </div>
                             </TableCell>
                           </TableRow>
@@ -959,7 +1068,12 @@ export default function Dashboard() {
                 <Info size={15} />
                 <p>
                   Budgets show the current configuration. Orders come from
-                  Shopify; purchases come from Google Ads.{" "}
+                  Shopify; purchases come from Google Ads. Today shows the
+                  order-count change between saved updates about an hour apart.
+                  Historical views compare today with yesterday at the same
+                  local time (±15 minutes); “Slower” means more than 20% below
+                  yesterday. Each source uses its own time zone. Missing
+                  snapshots need history from hourly syncs.{" "}
                   <button onClick={() => setView("guide")}>
                     About your data <ArrowUpRight size={12} />
                   </button>
@@ -1016,8 +1130,43 @@ export default function Dashboard() {
           )}
           {view === "connections" && (
             <>
+              {(data.google.some(
+                (c) => c.health?.status === "reauthorization_required",
+              ) ||
+                data.stores.some(
+                  (s) => s.shopHealth?.status === "reauthorization_required",
+                )) && (
+                <div className="notice connection-health-notice" role="status">
+                  <AlertCircle size={16} />
+                  <span>
+                    {reauthGoogle} Google{" "}
+                    {reauthGoogle === 1 ? "account" : "accounts"} and{" "}
+                    {reauthShop} Shopify {reauthShop === 1 ? "store" : "stores"}{" "}
+                    need reauthorization. Reconnect the flagged Google accounts
+                    or open the flagged stores to update credentials.
+                  </span>
+                </div>
+              )}
               <div className="connections-heading">
                 <h2>Google Ads accounts</h2>
+                <Button
+                  variant="outline"
+                  onClick={checkAccess}
+                  disabled={
+                    !data.database ||
+                    checkingConnections ||
+                    data.connectionCheck?.running ||
+                    (!data.google.length && !data.stores.length)
+                  }
+                >
+                  <RefreshCw
+                    size={14}
+                    className={data.connectionCheck?.running ? "spin" : ""}
+                  />
+                  {checkingConnections || data.connectionCheck?.running
+                    ? "Checking access…"
+                    : "Check access"}
+                </Button>
                 <Button
                   variant="outline"
                   onClick={() => setApiOpen(true)}
@@ -1031,16 +1180,41 @@ export default function Dashboard() {
               </div>
               <div className="connection-grid">
                 {data.google.map((connection) => (
-                  <section className="connection-card" key={connection.group}>
+                  <section
+                    className={`connection-card ${connection.health?.status === "reauthorization_required" ? "connection-reauth" : ""}`}
+                    key={connection.group}
+                  >
                     <div className="connection-card-top">
                       <SourceIcon source="google" />
-                      <span className="connected-tag">
-                        <Check size={12} />
-                        Connected
+                      <span
+                        className={`connected-tag health-tag health-${connection.health?.status || "unchecked"}`}
+                      >
+                        {connection.health?.status ===
+                          "reauthorization_required" ||
+                        connection.health?.status === "attention" ||
+                        connection.health?.status === "rate_limited" ? (
+                          <AlertCircle size={12} />
+                        ) : (
+                          <Check size={12} />
+                        )}
+                        {healthLabel(connection.health)}
                       </span>
                     </div>
                     <h3 title={connection.email}>{connection.email}</h3>
-                    <p>Google Ads account access</p>
+                    <p className="connection-health-message">
+                      {connection.health?.message ||
+                        "Refresh data to verify this Google account’s access."}
+                    </p>
+                    {connection.health?.checkedAt && (
+                      <small className="connection-checked-at">
+                        Last checked{" "}
+                        {new Date(connection.health.checkedAt).toLocaleString(
+                          "en-IN",
+                          { timeZone: "Asia/Kolkata" },
+                        )}{" "}
+                        IST
+                      </small>
+                    )}
                     <div className="connection-card-footer">
                       <span>
                         {
@@ -1116,14 +1290,33 @@ export default function Dashboard() {
                       <span>
                         <strong>{s.name}</strong>
                         <small>{s.domain}</small>
+                        {s.shopHealth && (
+                          <small className="mapping-health-detail">
+                            {s.shopHealth.message}
+                            {s.shopHealth.checkedAt
+                              ? ` · Checked ${new Date(s.shopHealth.checkedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST`
+                              : ""}
+                          </small>
+                        )}
                       </span>
                       <span className="mapping-cid">
                         {s.cid} · {accountLabel(s.group)}
                       </span>
-                      <span className="subtle-tag">
-                        {s.shopConnected
-                          ? "Credentials saved"
-                          : "Shopify setup needed"}
+                      <span className="mapping-health-tags">
+                        <span
+                          className={`subtle-tag health-tag health-${s.shopHealth?.status || "unchecked"}`}
+                        >
+                          Shopify ·{" "}
+                          {s.shopConnected
+                            ? healthLabel(s.shopHealth)
+                            : "Setup needed"}
+                        </span>
+                        {data.google.find((c) => c.group === s.group)?.health
+                          ?.status === "reauthorization_required" && (
+                          <span className="subtle-tag health-tag health-reauthorization_required">
+                            Google account needs reconnecting
+                          </span>
+                        )}
                       </span>
                       <ChevronRight size={16} />
                     </button>
@@ -1260,8 +1453,9 @@ export default function Dashboard() {
                 <div>
                   <Wallet size={18} />
                   <p>
-                    <strong>Daily budget</strong>Current Google Ads budgets,
-                    listed individually. Shared budgets appear once.
+                    <strong>Daily budget</strong>Current daily amounts for
+                    campaigns that ran during the selected dates. Full-day
+                    pauses are excluded; shared budgets count once.
                   </p>
                 </div>
                 <div>

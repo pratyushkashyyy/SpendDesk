@@ -24,7 +24,7 @@ export async function storeProducts(
     if (!data || !data.campaignDaily || targetCpaMissing || force) {
       const [catalog, ads] = await Promise.allSettled([
         fetchCatalog(store),
-        fetchProductAds(store, startDate, endDate, lock),
+        fetchProductAds(store, startDate, endDate, lock, !force),
       ]);
       data = {
         campaignDaily:

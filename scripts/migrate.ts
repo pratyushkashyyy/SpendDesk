@@ -11,6 +11,12 @@ try {
       "003_store_products",
       "004_date_ranges",
       "005_export_jobs",
+      "006_mcp_oauth",
+      "007_google_ads_quota",
+      "008_report_observations",
+      "009_budget_history",
+      "010_campaign_activity",
+      "011_quota_pause_status",
     ]) {
       const existing =
         await tx`SELECT name FROM schema_migrations WHERE name=${name}`;

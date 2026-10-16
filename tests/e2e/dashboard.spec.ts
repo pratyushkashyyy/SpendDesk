@@ -87,6 +87,25 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
           budgetId: "shared",
         },
       ],
+      alerts: [
+        {
+          campaignId: "1",
+          campaignName: "QA Shopping",
+          adName: "Ad 4",
+          status: "APPROVED_LIMITED",
+          details: ["Misleading ad design — prohibited"],
+        },
+        {
+          campaignId: "1",
+          campaignName: "QA Shopping",
+          adName: "Ad 5",
+          status: "APPROVED_LIMITED",
+          details: [
+            "Exaggerated claims — limited",
+            "Negative events and imagery — limited",
+          ],
+        },
+      ],
       raw: { test: true },
     };
     const shop = {
@@ -325,6 +344,10 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
   await expect(inline).toBeVisible();
   await expect(page).toHaveURL(overviewUrl);
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(inline.getByText("Yesterday", { exact: true })).toBeVisible();
+  await inline.getByLabel("Choose report date range").click();
+  await page.getByRole("button", { name: "Last 7 days", exact: true }).click();
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(inline.getByText("Last 7 days", { exact: true })).toBeVisible();
   await expect(
     inline.getByRole("tab", { name: /All campaigns/ }),
@@ -333,6 +356,23 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
   await expect(
     inline.getByText("Campaign spend", { exact: false }),
   ).toBeVisible();
+  const policySummary = inline.locator(".inline-policy-summary");
+  await expect(policySummary).not.toHaveAttribute("open");
+  await inline.screenshot({ path: "outputs/compact-campaigns.png" });
+  await policySummary.locator("summary").click();
+  await expect(
+    policySummary.getByText("Ad 4 · Misleading ad design — prohibited", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    policySummary.getByText(/Ad 5 · Exaggerated claims/),
+  ).toBeVisible();
+  await inline.screenshot({ path: "outputs/compact-campaigns-alerts.png" });
+  await policySummary.locator("summary").click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await inline.screenshot({ path: "outputs/compact-campaigns-mobile.png" });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await inline
     .getByRole("button", { name: "QA Shopping", exact: true })
     .click();

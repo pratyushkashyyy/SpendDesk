@@ -2,7 +2,13 @@
 import { useEffect, useState } from "react";
 import { LayoutGrid, ArrowRight, LockKeyhole } from "lucide-react";
 import { Button } from "@/components/ui/button";
-export default function SignIn({ setup = false }: { setup?: boolean }) {
+export default function SignIn({
+  setup = false,
+  returnTo = "/",
+}: {
+  setup?: boolean;
+  returnTo?: string;
+}) {
   const [ready, setReady] = useState(false);
   const [token, setToken] = useState(""),
     [error, setError] = useState(""),
@@ -28,7 +34,9 @@ export default function SignIn({ setup = false }: { setup?: boolean }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      window.location.assign("/");
+      window.location.assign(
+        returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/",
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {

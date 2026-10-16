@@ -1,6 +1,8 @@
+import { recordHealth, shopAuthFailure } from "./connection-health";
 import { decrypt } from "./crypto";
 import { fetchJson } from "./http";
 import { dateInZone, normalizeDomain, numberOrNull } from "../reporting";
+import { reportDates } from "../report-ranges";
 import type { ShopReport } from "../types";
 export type ShopCredentials = {
   clientId?: string;
@@ -13,23 +15,29 @@ export async function shopAccess(domain: string, credentials: ShopCredentials) {
   if (credentials.accessToken) return credentials.accessToken;
   if (!credentials.clientId || !credentials.clientSecret)
     throw new Error("Connect this Shopify store in its details.");
-  const response = await fetchJson(
-    `https://${domain}/admin/oauth/access_token`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "client_credentials",
-        client_id: credentials.clientId,
-        client_secret: credentials.clientSecret,
-      }),
-    },
-  );
-  if (!response.access_token)
-    throw new Error(
-      "Shopify access was not granted. Check the app is installed in the same organization.",
+  try {
+    const response = await fetchJson(
+      `https://${domain}/admin/oauth/access_token`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "client_credentials",
+          client_id: credentials.clientId,
+          client_secret: credentials.clientSecret,
+        }),
+      },
     );
-  return response.access_token as string;
+    if (!response.access_token)
+      throw new Error(
+        "Shopify access was not granted. Check the app is installed in the same organization.",
+      );
+    return response.access_token as string;
+  } catch (error) {
+    const health = shopAuthFailure(error);
+    await recordHealth("shop", domain, health.status, health.message);
+    throw new Error(health.message);
+  }
 }
 export async function shopGraphql(
   domain: string,
@@ -37,22 +45,42 @@ export async function shopGraphql(
   query: string,
   variables: Record<string, unknown> = {},
 ) {
-  const data = await fetchJson(
-    `https://${normalizeDomain(domain)}/admin/api/${process.env.SHOPIFY_API_VERSION || "2026-07"}/graphql.json`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": token,
+  domain = normalizeDomain(domain);
+  try {
+    const data = await fetchJson(
+      `https://${domain}/admin/api/${process.env.SHOPIFY_API_VERSION || "2026-07"}/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": token,
+        },
+        body: JSON.stringify({ query, variables }),
       },
-      body: JSON.stringify({ query, variables }),
-    },
-  );
-  if (data.errors?.length)
-    throw new Error(
-      "Shopify reporting access is unavailable. Check read_reports and protected customer data permissions.",
     );
-  return data.data;
+    if (data.errors?.length) {
+      const accessDenied = data.errors.some(
+        (error: { extensions?: { code?: string } }) =>
+          error.extensions?.code === "ACCESS_DENIED",
+      );
+      throw new Error(
+        accessDenied
+          ? "Shopify permissions are missing. Check the installed app’s read_reports/read_products scopes and protected customer data access."
+          : "Shopify could not complete this query. Check reporting access and API support.",
+      );
+    }
+    await recordHealth(
+      "shop",
+      domain,
+      "healthy",
+      "Shopify authorization verified.",
+    );
+    return data.data;
+  } catch (error) {
+    const health = shopAuthFailure(error);
+    await recordHealth("shop", domain, health.status, health.message);
+    throw new Error(health.message);
+  }
 }
 export async function fetchShop(
   store: { domain: string; shop_cipher: string | null },
@@ -82,7 +110,7 @@ export async function fetchShop(
       "Shopify could not run the sales report. Verify reporting access and query support.",
     );
   const row = report.tableData?.rows?.[0];
-  return {
+  const result: ShopReport = {
     sales: numberOrNull(row?.total_sales),
     orders: numberOrNull(row?.orders),
     currency: data.shop.currencyCode,
@@ -91,4 +119,27 @@ export async function fetchShop(
     fetchedAt: new Date().toISOString(),
     raw: report.tableData,
   };
+  if (date !== lastDate) {
+    const daily = await shopGraphql(store.domain, token, SHOP_QUERY, {
+      query: `FROM sales SHOW total_sales, orders TIMESERIES day SINCE ${date} UNTIL ${lastDate} ORDER BY day ASC LIMIT 1000`,
+    });
+    if (daily.shopifyqlQuery.parseErrors?.length)
+      throw new Error("Shopify could not run the daily sales report.");
+    const rows = daily.shopifyqlQuery.tableData?.rows;
+    if (!Array.isArray(rows))
+      throw new Error("Shopify did not return daily sales data.");
+    const dailyReports = reportDates(date, lastDate).map((day): ShopReport => {
+      const row = rows.find((r: any) => r.day === day);
+      if (!row) throw new Error(`Shopify did not return sales for ${day}.`);
+      return {
+        ...result,
+        date: day,
+        sales: numberOrNull(row.total_sales),
+        orders: numberOrNull(row.orders),
+        raw: row,
+      };
+    });
+    result.raw = { tableData: report.tableData, dailyReports };
+  }
+  return result;
 }

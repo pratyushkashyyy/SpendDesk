@@ -1,6 +1,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fetchAds } from "../lib/server/google";
+import { reportDates } from "../lib/report-ranges";
+import {
+  fetchAds as fetchSourceAds,
+  createAdsQuery,
+} from "../lib/server/google";
+import { fetchJson } from "../lib/server/http";
+const rawQuery = createAdsQuery((url, init) => fetchJson(url, init));
+const fetchAds: typeof fetchSourceAds = (
+  store,
+  auth,
+  offset,
+  from,
+  to,
+  options,
+) =>
+  fetchSourceAds(store, auth, offset, from, to, {
+    ...options,
+    query: (query) => rawQuery(store.cid, store.manager_cid, auth, query),
+  });
 import { matchProduct, productRows } from "../lib/product-matching";
 const auth = {
   accessToken: "test",
@@ -122,6 +140,14 @@ test("Google report keeps source values, deduplicates shared budgets, and refuse
         },
         metrics: { costMicros: "700000000" },
       }));
+    if (query.startsWith("SELECT segments.date,")) {
+      results = reportDates("2026-09-10", "2026-09-17").flatMap((date) =>
+        results.map((row: any) => ({
+          ...row,
+          segments: { ...row.segments, date },
+        })),
+      );
+    }
     return Response.json({ results });
   };
   try {
@@ -145,13 +171,20 @@ test("Google report keeps source values, deduplicates shared budgets, and refuse
       "2026-09-17",
     );
     assert.equal(purchaseOnly.costPerPurchase, 150);
-    await fetchAds(
+    const ranged = await fetchAds(
       { cid: "1234567890", manager_cid: "" },
       auth,
       0,
       "2026-09-10",
       "2026-09-17",
     );
+    const daily = (ranged.raw as any).dailyReports;
+    assert.equal(daily.length, 8);
+    assert.equal(daily[0].date, "2026-09-10");
+    assert.equal(daily[7].date, "2026-09-17");
+    assert.equal(daily[0].spend, 1500);
+    assert.equal(daily[0].costPerPurchase, 150);
+    assert.equal(daily[0].campaigns[0].spend, 700);
     assert.ok(
       dateFilters.some((query) =>
         query.includes("segments.date BETWEEN '2026-09-10' AND '2026-09-17'"),
@@ -163,9 +196,13 @@ test("Google report keeps source values, deduplicates shared budgets, and refuse
 });
 test("Google pagination is exhausted before rendering a report", async () => {
   const original = globalThis.fetch;
-  const { adsQuery } = await import("../lib/server/google");
+  const adsQuery = rawQuery;
   let pages = 0;
   globalThis.fetch = async (_url, init) => {
+    assert.equal(
+      (init?.headers as Record<string, string>)["developer-token"],
+      "test-developer-token",
+    );
     const body = JSON.parse(String(init?.body));
     pages++;
     return Response.json(
@@ -179,7 +216,10 @@ test("Google pagination is exhausted before rendering a report", async () => {
       await adsQuery(
         "1234567890",
         "",
-        auth,
+        {
+          ...auth,
+          config: { ...auth.config, developerToken: "test-developer-token" },
+        },
         "SELECT campaign.id FROM campaign",
       ),
       [{ id: 1 }, { id: 2 }],

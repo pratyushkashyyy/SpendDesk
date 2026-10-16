@@ -19,8 +19,10 @@ SpendDesk is a self-hosted dashboard for a single owner managing multiple stores
 - **Google Ads reporting:** actual spend, purchase conversions, eligible source-reported cost per purchase, campaign details, and configured budgets.
 - **Shopify orders:** source-reported order counts alongside ad performance. Shopify sales are hidden from the interface.
 - **Product drill-down:** open a store to browse its Shopify products, reported product-level ad activity, campaign totals, and saved manual campaign assignments.
-- **Budget visibility:** distinguish daily and other budget periods, and show shared budgets once with their associated campaigns.
+- **Budget visibility:** the store total uses current daily amounts only for campaigns enabled at any point during the selected account-local dates. Campaigns paused throughout are excluded; a one-minute run counts the full daily amount. Shared budgets count once. Pause/resume, creation, schedule dates, and budget reassignment history are checked; unavailable history is never treated as zero. Eligibility is retained with saved daily reports before Google’s 30-day change-history window expires. All configured amounts and edit history remain available in the budget history dialog.
 - **Refresh and history:** manual and scheduled refreshes, source errors, and preserved last successful snapshots.
+- **Budget history:** previous saved total daily budgets and their detection windows, plus exact individual budget edits imported from Google Ads' recent change history. Shared budgets count once. Older report dates never imply the budget was set on that date: configurations are recorded at the actual fetch time. Imported edits are cached daily, refreshed after detected changes with Google's reporting delay, and use the same background quota controls; opening charts adds no provider calls.
+- **Order flow:** an arrow in each row opens a smooth blue period-comparison chart with a dotted comparison line, dark hover tooltip, local timestamps, date controls, and a saved-data table. Daily charts compare with the previous equal-length period or the previous calendar month, using saved daily reports. Intraday charts show cumulative counts at genuine saved update times. A gray dash means unchanged or unavailable comparisons; the pop-up explains which. Today’s figures beneath historical selections; current values versus about an hour earlier in Today view. In Today view, the indicator shows orders added (or adjusted) between saved snapshots 45–75 minutes apart, with actual elapsed minutes and timestamps. In historical views, it compares today’s Shopify order count with yesterday’s snapshot around the same local time (within 15 minutes). More than 20% below yesterday is marked Slower. Missing or stale observations are explicit. Comparison history begins at deployment, needs about an hour/day to establish the respective baselines, and is retained for eight days without additional provider requests.
 - **Responsive workspace:** desktop overview, mobile navigation, search, store details, and connection management.
 - **Example mode:** 25 fictitious stores for exploring the interface without provider credentials.
 - **Private access:** one owner, password authentication, encrypted provider credentials, and protected APIs.
@@ -135,25 +137,26 @@ ShopifyQL reporting requires `read_reports` and Level 2 protected customer data 
 
 SpendDesk does not calculate profit, ROAS, blended CPA, or a combined store budget. Financial values are not added across stores or currencies. Current budget settings are not presented as historical budgets.
 
-A normal sync refreshes **today and the previous three days** to capture adjustments. Presets and custom ranges are requested directly from Google Ads and Shopify and stored as range snapshots; SpendDesk does not add daily snapshots together. Snapshots older than one hour are marked out of date, so that indicator can appear between scheduled refreshes. Saved date ranges, campaigns, and product snapshots are reused from PostgreSQL on subsequent views and exports, without an age-based provider fetch. A missing range is fetched and saved once. Use Refresh for updated source data; scheduled sync continues updating recent daily reports.
+A normal sync refreshes **today and the previous three days** to capture adjustments. Manual range refreshes request fresh provider totals and daily breakdowns, overwriting every saved date in the selected range and clearing prior errors on success. Daily records and their exact provider range snapshot are saved atomically for each store/source. Snapshots older than one hour are marked out of date, so that indicator can appear between scheduled refreshes. Saved date ranges, campaigns, and product snapshots are reused from PostgreSQL on subsequent views and exports, without an age-based provider fetch. Smaller ranges reuse complete daily coverage in the same source currency and time zone; only missing source/date gaps are fetched. Combined daily ranges leave source-only cost per purchase unavailable; refresh the exact range to obtain that provider metric. Old range-only snapshots need one manual refresh to populate daily coverage. Use Refresh for updated source data; scheduled sync continues updating recent daily reports.
 
 The **Export report** action opens a dialog asking for 1–366 days and an end date (India time, inclusive), then queues a background UTF-8 CSV report for all stores and Google accounts. A Download CSV button appears when the report is ready and disappears after download; the temporary export file is deleted while source snapshots remain saved. Queued work survives page reloads and is recovered after interruptions. The default is seven days ending yesterday. Missing reports are prepared automatically; preparation may take a couple of minutes. It keeps source currencies separate and includes source errors instead of filling unavailable values with zero.
 
 ### Scheduled refreshes
 
-The local scheduler refreshes **every hour**, regardless of store count. The scheduled worker checks every 15 minutes and skips until one hour has elapsed since its last completed sync. Manual refreshes remain available. Provider quotas still apply to both automatic and manual requests; the hourly schedule does not increase the Google Ads API allowance.
+The local scheduler refreshes **every hour**, regardless of store count. In Railway, `report-sync` runs hourly (`0 * * * *` UTC), refreshing today and the previous three source-local dates. A separate `report-sync-daily` worker refreshes all 30 days in the dashboard’s Last 30 days preset at **09:00 India time** (`30 3 * * *` UTC), including today. Scheduled workers wait for any active report sync instead of skipping their run. Manual refreshes remain available. Provider quotas still apply to both automatic and manual requests; the hourly schedule does not increase the Google Ads API allowance.
 
-PostgreSQL advisory locks prevent overlapping sync passes. Provider requests use bounded retries and 30-second timeouts.
+PostgreSQL advisory locks prevent overlapping sync passes. Provider requests use bounded retries and 30-second timeouts. Google Ads requests share a PostgreSQL-backed limiter across the dashboard and both workers, with at least one second between starts. Recent Ads dates are fetched together in 11 queries per hourly pass (10 report queries plus one pause/resume history query), instead of 28 separate daily report queries. The shared rolling 24-hour Explorer budget is 2,880 operations: the dashboard warns at 2,016 (70%), background requests stop at 2,304 (80%), and manual requests may use the remaining allowance. At the full limit all Google requests pause until capacity expires from the rolling window. Temporary rate limits use 30/60/120-second exponential delays plus jitter and honor longer Retry-After/RetryInfo hints; cooldowns persist across processes. Provider-reported daily exhaustion pauses Google requests for 24 hours. Successful pagination does not debit another operation; failed pages and uncertain transport attempts are counted conservatively. Usage tracks this application only, beginning at deployment; calls from other apps and earlier usage are not included. Saved reports remain readable during pauses. A quota pause is recorded as deferred Ads work, with the earliest retry time, rather than a source error or a failed Railway job. Shopify continues syncing, and skipped Ads snapshots keep their original values and timestamps. Genuine provider or database failures still fail the worker. At 24 accounts, 11 queries × 24 hourly runs requires about 6,336 operations/day before daily refreshes, so the Explorer cap cannot provide full hourly Ads coverage for every account; the governor deliberately pauses rather than exceeding the allowance.
 
 ## Deploy on Railway
 
-Create three services in one Railway project:
+Create four services in one Railway project:
 
 | Service       | Configuration                                                                                                       |
 | ------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `Postgres`    | Persistent PostgreSQL database                                                                                      |
 | `dashboard`   | Included Dockerfile; start `npm run start`; pre-deploy `npm run db:migrate`; health check `/api/health`             |
-| `report-sync` | Same source and Dockerfile; start `npm run sync`; cron `*/15 * * * *`; restart policy `NEVER`; no HTTP health check |
+| `report-sync` | Same source and Dockerfile; start `npm run sync -- --hourly`; cron `0 * * * *` (UTC); restart policy `NEVER`; no HTTP health check |
+| `report-sync-daily` | Same source and Dockerfile; start `npm run sync -- --last30`; cron `30 3 * * *` (09:00 Asia/Kolkata); restart policy `NEVER`; no HTTP health check |
 
 ### Environment variables
 
@@ -183,6 +186,7 @@ For CLI updates, link the project with the Railway CLI and upload matching relea
 ```bash
 railway up --service dashboard
 railway up --service report-sync
+railway up --service report-sync-daily
 ```
 
 Docker excludes `.env*` files and local data. `scripts/import-state.ts` is an optional private CLI utility, not a web endpoint. It accepts authenticated ciphertext encrypted with the target key and stops on owner or identity conflicts. Routine installations should connect providers through the interface.
@@ -242,3 +246,62 @@ Never commit environment files, `.local/`, provider tokens, private keys, databa
 | Local database port busy      | Another managed runtime using port 55432                            |
 
 SpendDesk is independent and is not affiliated with Google, Shopify, or Railway.
+
+## Connect SpendDesk to ChatGPT
+
+SpendDesk exposes an authenticated Streamable HTTP MCP server at
+`https://YOUR_DASHBOARD_DOMAIN/mcp`. In ChatGPT's Plugins interface, add a custom
+MCP server with that URL and choose **OAuth**. Leave client ID/secret blank when
+using automatic client registration. Sign in with your dashboard password and
+select **Allow access and report refresh** when refresh permission is requested.
+Read-only connections can select **Allow read-only access**. Availability depends on ChatGPT account and
+workspace permissions.
+
+Tools: `list_stores`, `get_store_reports`, `get_product_performance`,
+`get_sync_status`, and `refresh_data`. Ask, for example, “Show yesterday's ad spend and orders for
+my stores” or “Show campaign budgets for Store A.” The tools accept explicit
+inclusive dates and read saved exact snapshots or complete daily coverage. Ask “Refresh my stores, then show
+today's spend” to request new store reports. `refresh_data` runs in the background;
+`get_sync_status` reports its request ID, queue/running/completed state and source
+error counts. Omit dates to refresh today and the preceding three days in each
+source account time zone, or pass both `from` and `to` for an exact range of at most
+366 days. Overlapping refreshes are declined. Product workspace snapshots still
+need preparation/refresh in the dashboard. Responses include source currencies,
+time zones, timestamps and errors; hidden Shopify sales and raw provider payloads
+are excluded. This connection cannot change campaigns, budgets or dashboard settings.
+
+OAuth uses the existing owner session plus explicit consent, ChatGPT-only callback
+URLs, S256 PKCE, five-minute single-use authorization codes, one-hour access tokens
+and rotating 30-day refresh tokens. Token values are stored only as SHA-256 hashes.
+`APP_URL` must match the dashboard's public HTTPS origin. Migration `006_mcp_oauth`
+is applied by the existing pre-deploy migration command; no additional service,
+provider credentials or OpenAI API key is required.
+
+The OAuth revocation endpoint is `/api/mcp/oauth/revoke` (form-encoded `token` and
+`client_id`). To revoke all MCP access as the installation owner, delete rows from
+`mcp_oauth` with `kind IN ('access','refresh','code')`; this does not affect dashboard
+sessions or source data. Disconnecting a client stops its use; issued access tokens
+otherwise expire within one hour.
+
+Refresh requires the separate `dashboard:refresh` OAuth scope alongside
+`dashboard:read`. Existing read-only tokens retain their permissions. Refresh the
+custom MCP server's tool list in ChatGPT, then reconnect/authorize SpendDesk to
+grant refresh access. The consent page explicitly describes the report updates
+and provider API quota use. The refresh tool is marked as a write action for the
+host's normal tool-call approval flow.
+
+## Connection authorization status
+
+Connections shows the latest access status for each Google email and Shopify
+store, independently of the selected reporting dates. Revoked Google refresh
+grants and rejected/expired Shopify credentials are marked **Reauthorization
+required**. Missing permissions, API settings problems and temporary provider
+failures are marked **Needs attention**. Saved credentials that have not been
+checked are labeled **Not checked yet**. Badges include a reason and check time.
+
+Use **Check access** to verify every saved Google login (including those without
+store mappings) and Shopify connection without preparing reports. Checks run in
+the background and statuses also update during normal report/product refreshes.
+Reconnect a flagged Google account with the same email; open a flagged store to
+update its Shopify credentials or reauthorize/reinstall its app. Saving new
+credentials resets the previous authorization warning until access is checked.

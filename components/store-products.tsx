@@ -69,16 +69,18 @@ function CampaignCard({
   currency,
   store,
   demo = false,
+  showPolicyAlerts = true,
 }: {
   campaign: CampaignDetail;
   currency: string;
   store: Store;
   demo?: boolean;
+  showPolicyAlerts?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const policyAlerts = store.ads?.alerts?.filter(
-    (alert) => alert.campaignId === c.id,
-  );
+  const policyAlerts = showPolicyAlerts
+    ? store.ads?.alerts?.filter((alert) => alert.campaignId === c.id)
+    : [];
   return (
     <div className="product-campaign">
       <div className="product-campaign-title">
@@ -114,12 +116,6 @@ function CampaignCard({
               ? formatMoney(c.targetCpa, currency)
               : "Not set"}
           </strong>
-        </span>
-        <span>
-          Clicks<strong>{value(c.clicks)}</strong>
-        </span>
-        <span>
-          Impressions<strong>{value(c.impressions)}</strong>
         </span>
         <span>
           Conversions<strong>{value(c.conversions)}</strong>
@@ -163,6 +159,7 @@ export default function StoreProducts({
   demo,
   canAssign = false,
   initialTab = "products",
+  compact = false,
 }: {
   store: Store;
   from: string;
@@ -170,6 +167,7 @@ export default function StoreProducts({
   demo: boolean;
   canAssign?: boolean;
   initialTab?: "products" | "campaigns";
+  compact?: boolean;
 }) {
   const [data, setData] = useState<StoreProductsData | null>(null),
     [loading, setLoading] = useState(true),
@@ -296,50 +294,66 @@ export default function StoreProducts({
         .toLowerCase()
         .includes(search.toLowerCase()),
     ) || [];
+  const refreshButton = (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={loading || demo}
+      onClick={() => load(true)}
+    >
+      <RefreshCw size={14} className={loading ? "spin" : ""} />
+      Refresh products
+    </Button>
+  );
   return (
     <section
-      className="store-products"
+      className={`store-products${compact ? " store-products-compact" : ""}`}
       aria-label="Store products and campaigns"
     >
-      <div className="products-heading">
-        <div>
-          <p className="eyebrow">PRODUCT WORKSPACE</p>
-          <h3>Products & campaigns</h3>
-          <p className="muted">
-            {from === to ? from : `${from} – ${to}`} ·{" "}
-            {data?.timezone || store.ads?.timezone || "Account time zone"}
-            {demo ? " · Example data" : ""}
-          </p>
+      {!compact && (
+        <div className="products-heading">
+          <div>
+            <p className="eyebrow">PRODUCT WORKSPACE</p>
+            <h3>Products & campaigns</h3>
+            <p className="muted">
+              {from === to ? from : `${from} – ${to}`} ·{" "}
+              {data?.timezone || store.ads?.timezone || "Account time zone"}
+              {demo ? " · Example data" : ""}
+            </p>
+          </div>
+          {refreshButton}
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={loading || demo}
-          onClick={() => load(true)}
+      )}
+      <div className={compact ? "compact-workspace-toolbar" : undefined}>
+        <div
+          className="product-tabs"
+          role="tablist"
+          aria-label="Product workspace"
         >
-          <RefreshCw size={14} className={loading ? "spin" : ""} />
-          Refresh products
-        </Button>
-      </div>
-      <div
-        className="product-tabs"
-        role="tablist"
-        aria-label="Product workspace"
-      >
-        <button
-          role="tab"
-          aria-selected={tab === "products"}
-          onClick={() => setTab("products")}
-        >
-          Products{data ? ` (${data.products.length})` : ""}
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "campaigns"}
-          onClick={() => setTab("campaigns")}
-        >
-          All campaigns{data ? ` (${data.campaigns.length})` : ""}
-        </button>
+          <button
+            role="tab"
+            aria-selected={tab === "products"}
+            onClick={() => setTab("products")}
+          >
+            Products{data ? ` (${data.products.length})` : ""}
+          </button>
+          <button
+            role="tab"
+            aria-selected={tab === "campaigns"}
+            onClick={() => setTab("campaigns")}
+          >
+            All campaigns{data ? ` (${data.campaigns.length})` : ""}
+          </button>
+        </div>
+        {compact && (
+          <div className="compact-workspace-tools">
+            <small>
+              {data?.timezone || store.ads?.timezone || "Account time zone"}
+              {demo ? " · Example data" : ""}
+            </small>
+            {refreshButton}
+          </div>
+        )}
       </div>
       {error && (
         <p role="alert" className="form-error">
@@ -477,6 +491,7 @@ export default function StoreProducts({
                                 store={store}
                                 demo={demo}
                                 currency={data.currency}
+                                showPolicyAlerts={!compact}
                               />
                             ) : (
                               <p>
@@ -498,14 +513,6 @@ export default function StoreProducts({
                                       <strong>
                                         {formatMoney(r.spend, data.currency)}
                                       </strong>
-                                    </span>
-                                    <span>
-                                      Product clicks
-                                      <strong>{value(r.clicks)}</strong>
-                                    </span>
-                                    <span>
-                                      Impressions
-                                      <strong>{value(r.impressions)}</strong>
                                     </span>
                                     <span>
                                       Conversions
@@ -605,6 +612,7 @@ export default function StoreProducts({
                   demo={demo}
                   currency={data.currency}
                   key={c.id}
+                  showPolicyAlerts={!compact}
                 />
               ))}
               {!data.campaigns.length && (

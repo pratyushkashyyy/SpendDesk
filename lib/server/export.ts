@@ -1,3 +1,4 @@
+import { savedReports } from "./report-cache";
 import { db } from "./db";
 import { storeProducts } from "./store-products";
 import { matchProduct } from "../product-matching";
@@ -51,9 +52,7 @@ export async function buildExport(from: string, to: string) {
     const [stores, connections, reports] = await Promise.all([
       db()`SELECT * FROM stores ORDER BY group_id,name`,
       db()`SELECT group_id,email FROM google_connections ORDER BY group_id`,
-      from === to
-        ? db()`SELECT store_id,source,payload,error,checked_at FROM reports WHERE report_date=${from}::date`
-        : db()`SELECT store_id,source,payload,error,checked_at FROM report_ranges WHERE start_date=${from}::date AND end_date=${to}::date`,
+      savedReports(from, to),
     ]);
     const byReport = (storeId: string, source: string) =>
       reports.find((r) => r.store_id === storeId && r.source === source);

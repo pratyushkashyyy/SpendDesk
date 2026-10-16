@@ -11,8 +11,8 @@
     "start": "next start --hostname 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
-    "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/migrate.ts",
-    "sync": "node --env-file-if-exists=.env.local --import tsx scripts/sync.ts",
+    "db:migrate": "node --import ./scripts/load-env.mjs --import tsx scripts/migrate.ts",
+    "sync": "node --import ./scripts/load-env.mjs --import tsx scripts/sync.ts",
     "db:local": "tsx scripts/local-db.ts",
     "test:browser": "playwright test",
     "test:integration": "node --env-file=.env.local --import tsx --test tests/integration/*.test.ts",
@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@shadcn/react": "0.3.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
