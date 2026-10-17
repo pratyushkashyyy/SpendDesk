@@ -14,6 +14,7 @@ import { supportEmail } from "@/components/public-site";
 import styles from "../public.module.css";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/about" },
   title: "SpendDesk · Google Ads and Shopify reporting",
   description:
     "SpendDesk brings Google Ads spending, campaign budgets, purchase conversions, and Shopify order counts into one private reporting workspace.",

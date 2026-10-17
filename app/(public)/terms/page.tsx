@@ -3,6 +3,7 @@ import Link from "next/link";
 import { PolicyPage, supportEmail } from "@/components/public-site";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/terms" },
   title: "Terms of service · SpendDesk",
   description:
     "Conditions for authorized use of SpendDesk, including connected account permissions, source reporting limits, privacy, and support.",

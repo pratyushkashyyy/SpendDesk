@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { PublicSite } from "@/components/public-site";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://spenddesk.unicornkart.us"),
   robots: { index: true, follow: true },
 };
 

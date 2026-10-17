@@ -96,12 +96,38 @@ Create the database first. Set `ENCRYPTION_KEY` to 64 hexadecimal characters and
 
    ```text
    http://127.0.0.1:3000/api/google/callback
-   https://YOUR_HOST/api/google/callback
+   https://spenddesk.unicornkart.us/api/google/callback
    ```
 
 4. In **Connections → API settings**, save the OAuth client ID and secret.
 5. Choose **Add a Google account** for each login. Connections appear by email address.
 6. Add a store, enter its CID, and select the Google connection that has access. Enter a manager CID only when accessing the customer through a manager account.
+
+### Production branding and domain
+
+The production origin is `https://spenddesk.unicornkart.us`. Connect this hostname
+to the dashboard service in Railway and set the web service's `APP_URL` to that
+exact origin. Keep local development and test origins on localhost.
+
+Use these public URLs in Google Auth Platform → Branding:
+
+| Field | URL |
+| --- | --- |
+| Application home page | `https://spenddesk.unicornkart.us/about` |
+| Privacy policy | `https://spenddesk.unicornkart.us/privacy` |
+| Terms of service | `https://spenddesk.unicornkart.us/terms` |
+
+The support contact is `contact-us@unicornkart.us`. Verify ownership of
+`unicornkart.us` and add it to Google's authorized domains. Register
+`https://spenddesk.unicornkart.us/api/google/callback` as an authorized redirect
+URI on the existing Google OAuth web client before connecting Google accounts
+from the new hostname. Changing the hostname does not change saved source
+reports or the configured API quota.
+
+Dashboard sessions are specific to the hostname, so sign in again on the new
+domain. Existing ChatGPT connections must be updated to
+`https://spenddesk.unicornkart.us/mcp` and reauthorized: OAuth issuer and resource
+URLs follow `APP_URL`, and tokens issued for the old resource are not reused.
 
 API access is now associated with the Google Cloud project; developer tokens were sunset on September 9, 2026. See [Google's access migration guide](https://developers.google.com/google-ads/api/docs/api-policy/developer-token). External OAuth apps in testing can have expiring authorizations; review [Google's OAuth guidance](https://developers.google.com/identity/protocols/oauth2) before relying on unattended refreshes.
 
@@ -166,7 +192,7 @@ Create four services in one Railway project:
 | `ENCRYPTION_KEY`         | Required | Required | Same 64-character hexadecimal key                              |
 | `SESSION_SECRET`         | Required | —        | Random signing secret                                          |
 | `SETUP_TOKEN`            | Required | —        | Random one-time enrollment token                               |
-| `APP_URL`                | Required | —        | Exact public HTTPS origin, without a trailing slash            |
+| `APP_URL`                | Required | —        | `https://spenddesk.unicornkart.us` in production; no trailing slash |
 | `SYNC_SCHEDULED`         | `false`  | `true`   | Enable hourly interval checks on the worker                    |
 | `GOOGLE_ADS_API_VERSION` | Optional | Optional | Defaults to `v25`; keep versions consistent                    |
 | `SHOPIFY_API_VERSION`    | Optional | Optional | Defaults to `2026-07`; keep versions consistent                |
@@ -176,8 +202,8 @@ Use Railway's private database reference for `DATABASE_URL`. Generate distinct s
 
 After the web service is healthy:
 
-1. Open `https://YOUR_HOST/setup#YOUR_SETUP_TOKEN` and create the owner password. Enrollment succeeds once.
-2. Register `https://YOUR_HOST/api/google/callback` on the Google OAuth client.
+1. Open `https://spenddesk.unicornkart.us/setup#YOUR_SETUP_TOKEN` and create the owner password. Enrollment succeeds once.
+2. Register `https://spenddesk.unicornkart.us/api/google/callback` on the Google OAuth client.
 3. Connect accounts and stores through the hosted interface.
 4. Run a manual refresh and compare one store's source values before adding the rest.
 
@@ -250,7 +276,7 @@ SpendDesk is independent and is not affiliated with Google, Shopify, or Railway.
 ## Connect SpendDesk to ChatGPT
 
 SpendDesk exposes an authenticated Streamable HTTP MCP server at
-`https://YOUR_DASHBOARD_DOMAIN/mcp`. In ChatGPT's Plugins interface, add a custom
+`https://spenddesk.unicornkart.us/mcp`. In ChatGPT's Plugins interface, add a custom
 MCP server with that URL and choose **OAuth**. Leave client ID/secret blank when
 using automatic client registration. Sign in with your dashboard password and
 select **Allow access and report refresh** when refresh permission is requested.

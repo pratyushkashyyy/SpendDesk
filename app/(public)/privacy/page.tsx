@@ -3,6 +3,7 @@ import Link from "next/link";
 import { PolicyPage, supportEmail } from "@/components/public-site";
 
 export const metadata: Metadata = {
+  alternates: { canonical: "/privacy" },
   title: "Privacy policy · SpendDesk",
   description:
     "How SpendDesk accesses, uses, stores, and shares Google Ads and Shopify data, and how to request deletion or revoke access.",
