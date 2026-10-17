@@ -174,6 +174,85 @@ test(
       } finally {
         connection.release();
       }
+
+      // Tier changes must update every process without resetting usage or
+      // removing a provider-imposed cooldown/exhaustion window.
+      const upgradingScope = "basic-upgrade";
+      await sql`INSERT INTO google_ads_quota_state(scope) VALUES(${upgradingScope})`;
+      await sql`INSERT INTO google_ads_operations(scope,operations,background) SELECT ${upgradingScope},1,true FROM generate_series(1,2304)`;
+      assert.equal(
+        (await googleQuotaStatus(upgradingScope)).backgroundPaused,
+        true,
+      );
+      const [heldState] =
+        await sql`SELECT cooldown_until,exhausted_until,next_request_at FROM google_ads_quota_state WHERE scope=${scope}`;
+      const migrate = (limit?: string) => {
+        const env = { ...process.env };
+        if (limit === undefined) delete env.GOOGLE_ADS_DAILY_LIMIT;
+        else env.GOOGLE_ADS_DAILY_LIMIT = limit;
+        return promisify(execFile)(
+          process.execPath,
+          ["--import", "tsx", "scripts/migrate.ts"],
+          { env },
+        );
+      };
+      await migrate("15000");
+      let upgraded = await googleQuotaStatus(upgradingScope);
+      assert.equal(upgraded.limit, 15000);
+      assert.equal(upgraded.used, 2304);
+      assert.equal(upgraded.backgroundPaused, false);
+      assert.deepEqual(
+        (
+          await sql`SELECT cooldown_until,exhausted_until,next_request_at FROM google_ads_quota_state WHERE scope=${scope}`
+        )[0],
+        heldState,
+      );
+      assert.equal((await googleQuotaStatus(scope)).exhausted, true);
+      const shared = await promisify(execFile)(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          "--input-type=module",
+          "-e",
+          `import { reserveGoogleRequest } from './lib/server/google-quota.ts'; import { db } from './lib/server/db.ts'; console.log(JSON.stringify(await reserveGoogleRequest({scope:'basic-upgrade',background:true}))); await db().end();`,
+        ],
+        { env: process.env },
+      );
+      assert.equal(JSON.parse(shared.stdout).reason, "allowed");
+      await sql`INSERT INTO google_ads_operations(scope,operations,background) SELECT ${upgradingScope},1,true FROM generate_series(1,8195)`;
+      upgraded = await googleQuotaStatus(upgradingScope);
+      assert.equal(upgraded.used, 10500);
+      assert.equal(upgraded.warning, true);
+      assert.equal(upgraded.backgroundPaused, false);
+      await sql`INSERT INTO google_ads_operations(scope,operations,background) SELECT ${upgradingScope},1,true FROM generate_series(1,1500)`;
+      assert.equal(
+        (await googleQuotaStatus(upgradingScope)).backgroundPaused,
+        true,
+      );
+      assert.equal(
+        (
+          await reserveGoogleRequest({
+            scope: upgradingScope,
+            background: true,
+          })
+        ).reason,
+        "background",
+      );
+      assert.equal(
+        (
+          await reserveGoogleRequest({
+            scope: upgradingScope,
+            background: false,
+          })
+        ).reason,
+        "allowed",
+      );
+      await migrate();
+      assert.equal((await googleQuotaStatus(upgradingScope)).limit, 15000);
+      await assert.rejects(migrate("0"));
+      assert.equal((await googleQuotaStatus(upgradingScope)).limit, 15000);
+      assert.equal((await googleQuotaStatus(upgradingScope)).used, 12001);
     } finally {
       await sql`TRUNCATE google_ads_operations,google_ads_quota_state`;
       await sql.end();
