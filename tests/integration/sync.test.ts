@@ -137,6 +137,24 @@ test(
         if (failAds)
           return Response.json({ error: "not authorized" }, { status: 403 });
         const q = body.query;
+        if (/campaign\.(start_date|end_date)\b/.test(q))
+          return Response.json(
+            {
+              error: {
+                details: [
+                  {
+                    errors: [
+                      {
+                        errorCode: { queryError: "UNRECOGNIZED_FIELD" },
+                        message: "Removed campaign date fields",
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+            { status: 400 },
+          );
         if (q.startsWith("SELECT segments.date,")) {
           const [, from, to] = q.match(/BETWEEN '([^']+)' AND '([^']+)'/) || [];
           return Response.json({
@@ -195,6 +213,7 @@ test(
                 id: "1",
                 name: "Fixture shopping",
                 status: "ENABLED",
+                startDateTime: "2026-01-01 00:00:00",
               },
               campaignBudget: {
                 id: "daily",

@@ -4,6 +4,7 @@ import {
   activeBudget,
   campaignActivity,
   eligibleBudgetIds,
+  configuredCampaignQuery,
 } from "../lib/campaign-activity";
 import type { AdsReport } from "../lib/types";
 
@@ -39,6 +40,103 @@ const event = (
     oldResource: { campaign: { status: oldStatus } },
     newResource: { campaign: { status } },
   },
+});
+test("v25 campaign configuration uses supported date-time fields and preserves short serving windows", () => {
+  assert.match(configuredCampaignQuery, /campaign.start_date_time/);
+  assert.match(configuredCampaignQuery, /campaign.end_date_time/);
+  assert.doesNotMatch(
+    configuredCampaignQuery,
+    /campaign\.(start_date|end_date)\b/,
+  );
+  const row = (id: string, startDateTime: string, endDateTime = "") => ({
+    ...configured(id, "ENABLED"),
+    campaign: { id, name: id, status: "ENABLED", startDateTime, endDateTime },
+  });
+  const activity = campaignActivity(
+    [
+      row("minute", "2026-10-15 23:59:00", "2026-10-16 00:00:00"),
+      row("future", "2026-10-16 17:00:00"),
+      row("ended", "2026-01-01 00:00:00", "2026-10-14 23:59:59"),
+    ],
+    [],
+    "UTC",
+    at,
+  );
+  assert.equal(activity.complete, true);
+  assert.deepEqual(
+    [...eligibleBudgetIds(activity, "2026-10-15", "2026-10-15")],
+    ["minute"],
+  );
+  assert.deepEqual(
+    [...eligibleBudgetIds(activity, "2026-10-16", "2026-10-16")],
+    ["minute"],
+  );
+  const inZone = campaignActivity(
+    [row("future", "2026-10-16 12:01:00")],
+    [],
+    "America/New_York",
+    at,
+  );
+  assert.deepEqual(
+    [...eligibleBudgetIds(inZone, "2026-10-16", "2026-10-16")],
+    [],
+  );
+});
+test("new date-time history paths reconstruct schedule changes and cleared end dates", () => {
+  const change = event("1", "2026-10-16T10:00:00Z", "ENABLED", "ENABLED");
+  Object.assign(change.changeEvent, {
+    changedFields: "start_date_time,end_date_time",
+    oldResource: {
+      campaign: {
+        startDateTime: "2026-10-15 00:00:00",
+        endDateTime: "2026-10-15 23:59:59",
+      },
+    },
+    newResource: { campaign: { startDateTime: "2026-10-15 00:00:00" } },
+  });
+  const current = configured("1", "ENABLED");
+  Object.assign(current.campaign, {
+    startDateTime: "2026-10-15 00:00:00",
+    endDateTime: "",
+  });
+  const activity = campaignActivity([current], [change], "UTC", at);
+  assert.equal(activity.complete, true);
+  assert.equal(activity.events[0].before.endDate, "2026-10-15 23:59:59");
+  assert.equal(activity.events[0].after.endDate, "");
+  assert.deepEqual(
+    [...eligibleBudgetIds(activity, "2026-10-15", "2026-10-15")],
+    ["1"],
+  );
+  assert.deepEqual(
+    [...eligibleBudgetIds(activity, "2026-10-16", "2026-10-16")],
+    ["1"],
+  );
+});
+test("date-time schedule bounds respect repeated DST hours and reject nonexistent local times", () => {
+  const row = configured("1", "ENABLED");
+  Object.assign(row.campaign, {
+    startDateTime: "2026-11-01 01:15:00",
+    endDateTime: "2026-11-01 01:45:00",
+  });
+  const activity = campaignActivity(
+    [row],
+    [event("1", "2026-11-01T06:20:00Z", "PAUSED", "ENABLED")],
+    "America/New_York",
+    "2026-11-02T15:00:00Z",
+  );
+  assert.equal(activity.complete, true);
+  assert.deepEqual(
+    [...eligibleBudgetIds(activity, "2026-11-01", "2026-11-01")],
+    ["1"],
+  );
+  Object.assign(row.campaign, {
+    startDateTime: "2026-03-08 02:30:00",
+    endDateTime: "",
+  });
+  assert.equal(
+    campaignActivity([row], [], "America/New_York", at).complete,
+    false,
+  );
 });
 test("paused all day is excluded; even one minute enabled with no delivery counts; shared budgets count once", () => {
   const activity = campaignActivity(

@@ -34,7 +34,11 @@ export type ActiveBudget = {
   note: string;
 };
 export const configuredCampaignQuery =
-  "SELECT campaign.id, campaign.name, campaign.status, campaign.start_date, campaign.end_date, campaign_budget.id, campaign_budget.name, campaign_budget.amount_micros, campaign_budget.explicitly_shared, campaign_budget.period FROM campaign WHERE campaign.status IN (ENABLED, PAUSED, REMOVED)";
+  "SELECT campaign.id, campaign.name, campaign.status, campaign.start_date_time, campaign.end_date_time, campaign_budget.id, campaign_budget.name, campaign_budget.amount_micros, campaign_budget.explicitly_shared, campaign_budget.period FROM campaign WHERE campaign.status IN (ENABLED, PAUSED, REMOVED)";
+function configuredDate(campaign: any, field: "startDate" | "endDate") {
+  // Normalize the v23+ JSON fields while retaining saved legacy observations.
+  return campaign[`${field}Time`] ?? campaign[field];
+}
 export function campaignChangesQuery(
   from: string,
   to: string,
@@ -73,12 +77,19 @@ export function campaignActivity(
         name: c.name,
         status: c.status,
         budgetId: b.id,
-        startDate: c.startDate,
-        endDate: c.endDate,
+        startDate: configuredDate(c, "startDate"),
+        endDate: configuredDate(c, "endDate"),
       },
     ];
   });
-  let complete = !error && rows.length < 10000;
+  let complete =
+    !error &&
+    rows.length < 10000 &&
+    campaigns.every(
+      (c) =>
+        !Number.isNaN(scheduleBoundary(c.startDate, timezone, false)) &&
+        !Number.isNaN(scheduleBoundary(c.endDate, timezone, true)),
+    );
   const events: CampaignActivity["events"] = [];
   const fields = {
     status: "status",
@@ -86,8 +97,12 @@ export function campaignActivity(
     campaignBudget: "budgetId",
     start_date: "startDate",
     startDate: "startDate",
+    start_date_time: "startDate",
+    startDateTime: "startDate",
     end_date: "endDate",
     endDate: "endDate",
+    end_date_time: "endDate",
+    endDateTime: "endDate",
   } as const;
   for (const row of rows) {
     const e = row.changeEvent;
@@ -121,12 +136,22 @@ export function campaignActivity(
         if (field === "budgetId")
           values.budgetId =
             c.campaignBudget?.match(/\/campaignBudgets\/(\d+)$/)?.[1] || "";
+        else if (field === "startDate" || field === "endDate")
+          values[field] = configuredDate(c, field) || "";
         else if (field) values[field] = c[field] || "";
       }
       return values;
     };
     const before = patch(e.oldResource),
       after = patch(e.newResource);
+    if (
+      [before, after].some(
+        (config) =>
+          Number.isNaN(scheduleBoundary(config.startDate, timezone, false)) ||
+          Number.isNaN(scheduleBoundary(config.endDate, timezone, true)),
+      )
+    )
+      complete = false;
     if (operation === "REMOVE" && !before.status) complete = false;
     if (
       operation === "UPDATE" &&
@@ -174,6 +199,78 @@ function dayStart(day: string, zone: string) {
   boundaries.set(key, high);
   return high;
 }
+const scheduleTimes = new Map<string, number>();
+const wallFormatters = new Map<string, Intl.DateTimeFormat>();
+function wallTime(at: number, zone: string) {
+  let formatter = wallFormatters.get(zone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+    wallFormatters.set(zone, formatter);
+  }
+  const parts = formatter.formatToParts(new Date(at));
+  const part = (type: string) =>
+    Number(parts.find((p) => p.type === type)!.value);
+  return Date.UTC(
+    part("year"),
+    part("month") - 1,
+    part("day"),
+    part("hour"),
+    part("minute"),
+    part("second"),
+  );
+}
+function scheduleBoundary(
+  value: string | undefined,
+  zone: string,
+  end: boolean,
+) {
+  if (!value) return end ? Infinity : -Infinity;
+  const key = `${zone}:${value}:${end}`;
+  if (scheduleTimes.has(key)) return scheduleTimes.get(key)!;
+  const day = value.slice(0, 10);
+  if (!validDate(day)) return NaN;
+  const nextDay = new Date(Date.parse(day) + 86400000)
+    .toISOString()
+    .slice(0, 10);
+  if (validDate(value)) {
+    // Previously saved date-only end dates included the entire last day.
+    return end && value >= "2037-12-30"
+      ? Infinity
+      : dayStart(end ? nextDay : day, zone);
+  }
+  if (!/^\d{4}-\d{2}-\d{2} (?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(value))
+    return NaN;
+  const target = Date.parse(value.replace(" ", "T") + "Z");
+  const first = dayStart(day, zone),
+    last = dayStart(nextDay, zone) - 1000;
+  const offsets = new Set([
+    wallTime(first, zone) - first,
+    wallTime(last, zone) - last,
+  ]);
+  const candidates = [...offsets]
+    .map((offset) => target - offset)
+    .filter((at) => wallTime(at, zone) === target);
+  // Date-times use the account's zone, never the worker/browser zone. During a
+  // repeated DST hour retain any possible serving interval; a nonexistent time
+  // makes history incomplete rather than silently treating the campaign as off.
+  const at = candidates.length
+    ? end
+      ? Math.max(...candidates) + 1000
+      : Math.min(...candidates)
+    : NaN;
+  if (scheduleTimes.size > 2000) scheduleTimes.clear();
+  scheduleTimes.set(key, at);
+  return at;
+}
 export function eligibleBudgetIds(
   activity: CampaignActivity,
   from: string,
@@ -193,21 +290,16 @@ export function eligibleBudgetIds(
       until = Date.parse(activity.at);
     const add = (since: number) => {
       if (!config || config.status !== "ENABLED" || !config.budgetId) return;
-      const scheduledStart =
-        config.startDate && validDate(config.startDate)
-          ? dayStart(config.startDate, activity.timezone)
-          : -Infinity;
-      const scheduledEnd =
-        config.endDate &&
-        validDate(config.endDate) &&
-        config.endDate < "2037-12-30"
-          ? dayStart(
-              new Date(Date.parse(config.endDate) + 86400000)
-                .toISOString()
-                .slice(0, 10),
-              activity.timezone,
-            )
-          : Infinity;
+      const scheduledStart = scheduleBoundary(
+        config.startDate,
+        activity.timezone,
+        false,
+      );
+      const scheduledEnd = scheduleBoundary(
+        config.endDate,
+        activity.timezone,
+        true,
+      );
       if (
         Math.max(start, since, scheduledStart) <
         Math.min(end, until, scheduledEnd)

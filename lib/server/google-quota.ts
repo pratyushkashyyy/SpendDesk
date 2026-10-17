@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { db } from "./db";
-import { UpstreamError } from "./http";
+import { googleAdsRequestError } from "./google-errors";
 import type { GoogleQuotaStatus } from "../types";
 
 export type AdsRequestContext = {
@@ -245,7 +245,18 @@ export async function requestGoogleAds(
         new Date(Date.now() + delay).toISOString(),
       );
     }
-    throw new UpstreamError(response.status);
+    const failure = googleAdsRequestError(
+      response.status,
+      payload,
+      JSON.parse(String(init.body)).query || "",
+    );
+    console.error(
+      JSON.stringify({
+        event: "google_ads_request_failed",
+        ...failure.diagnostics,
+      }),
+    );
+    throw failure.error;
   }
   throw new Error("Google reports are temporarily unavailable.");
 }

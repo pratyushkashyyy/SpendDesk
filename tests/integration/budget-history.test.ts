@@ -137,7 +137,7 @@ test("budget triggers capture real configuration changes across report dates and
                   id: "1",
                   name: "Active",
                   status: "ENABLED",
-                  startDate: "2026-01-01",
+                  startDateTime: "2026-01-01 00:00:00",
                 },
                 campaignBudget: {
                   id: "1",
@@ -152,7 +152,7 @@ test("budget triggers capture real configuration changes across report dates and
                   id: "2",
                   name: "Paused",
                   status: "PAUSED",
-                  startDate: "2026-01-01",
+                  startDateTime: "2026-01-01 00:00:00",
                 },
                 campaignBudget: {
                   id: "2",
