@@ -3,6 +3,18 @@ const config: NextConfig = {
   distDir: process.env.STOREDESK_BROWSER_TEST === "true" ? ".next-test" : ".next",
   poweredByHeader: false,
   devIndicators: false,
+  async redirects() {
+    return [
+      {
+        source: "/:path*",
+        has: [
+          { type: "host", value: "dashboard-production-30d6.up.railway.app" },
+        ],
+        destination: "https://spenddesk.unicornkart.us/:path*",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {

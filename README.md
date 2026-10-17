@@ -108,6 +108,8 @@ Create the database first. Set `ENCRYPTION_KEY` to 64 hexadecimal characters and
 The production origin is `https://spenddesk.unicornkart.us`. Connect this hostname
 to the dashboard service in Railway and set the web service's `APP_URL` to that
 exact origin. Keep local development and test origins on localhost.
+The previous Railway hostname redirects to the custom domain, preserving paths
+and query parameters.
 
 Use these public URLs in Google Auth Platform → Branding:
 
