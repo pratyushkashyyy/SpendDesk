@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { LayoutGrid, ArrowRight, LockKeyhole } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
 export default function SignIn({
   setup = false,
   returnTo = "/",
@@ -100,6 +101,11 @@ export default function SignIn({
         <small>
           Your Google and Shopify passwords are never requested here.
         </small>
+        <nav className="auth-public-links" aria-label="About SpendDesk">
+          <Link href="/about">About SpendDesk</Link>
+          <Link href="/privacy">Privacy policy</Link>
+          <Link href="/terms">Terms of service</Link>
+        </nav>
       </div>
     </main>
   );
