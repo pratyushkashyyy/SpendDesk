@@ -27,6 +27,7 @@ const columns = [
   "Clicks",
   "Impressions",
   "Conversions",
+  "Cost / conversion",
   "Product item ID / SKU",
   "Shopify product ID",
   "Source error",
@@ -161,6 +162,7 @@ export async function buildExport(from: string, to: string) {
           Clicks: campaign.clicks,
           Impressions: campaign.impressions,
           Conversions: campaign.conversions,
+          "Cost / conversion": campaign.costPerConversion,
           "Source error": products.adsError,
           "Updated at": products.fetchedAt,
         });

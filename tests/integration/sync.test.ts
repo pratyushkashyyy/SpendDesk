@@ -9,6 +9,7 @@ import { encrypt, decrypt } from "../../lib/server/crypto";
 import { buildExport } from "../../lib/server/export";
 import { processExportJobs } from "../../lib/server/export-jobs";
 import { storeProducts } from "../../lib/server/store-products";
+import { fetchProductAds } from "../../lib/server/products";
 import { syncReports } from "../../lib/server/sync";
 import { googleQuotaScope } from "../../lib/server/google-quota";
 import { savedReports } from "../../lib/server/report-cache";
@@ -193,6 +194,39 @@ test(
               },
             ],
           });
+        if (
+          q.startsWith("SELECT campaign.id,") &&
+          q.includes("cost_per_conversion")
+        ) {
+          const metrics = {
+            costMicros: "105000000",
+            conversions: 3.5,
+            costPerConversion: "31250000",
+          };
+          return Response.json({
+            results: q.includes("segments.date,")
+              ? [
+                  {
+                    campaign: { id: "1" },
+                    segments: { date: "2026-09-17" },
+                    metrics,
+                  },
+                  {
+                    campaign: { id: "1" },
+                    segments: { date: "2026-09-16" },
+                    metrics: { conversions: 0, costPerConversion: 0 },
+                  },
+                  {
+                    campaign: { id: "1" },
+                    segments: { date: "2026-09-15" },
+                    metrics: { conversions: 2 },
+                  },
+                ]
+              : [{ campaign: { id: "1" }, metrics }],
+          });
+        }
+        if (q.includes("FROM shopping_performance_view"))
+          return Response.json({ results: [] });
         if (q.includes("cost_per_conversion"))
           return Response.json({
             results: [
@@ -268,6 +302,34 @@ test(
         "four recent Ads days and campaign pause history are fetched in eleven queries",
       );
       assert.equal(first.errors, 0);
+      const beforeProductAds = adsCalls;
+      const campaignMetrics = await fetchProductAds(
+        { cid: "1234567890", manager_cid: "", group_id: 3 },
+        "2026-09-10",
+        "2026-09-17",
+        sql,
+      );
+      assert.equal(
+        adsCalls - beforeProductAds,
+        4,
+        "metric uses the existing four queries",
+      );
+      assert.equal(
+        campaignMetrics.campaigns[0].costPerConversion,
+        31.25,
+        "uses Google's reported metric, not the 30.00 spend/conversions ratio",
+      );
+      assert.equal(campaignMetrics.campaignDaily[0].costPerConversion, 31.25);
+      assert.equal(
+        campaignMetrics.campaignDaily[1].costPerConversion,
+        null,
+        "zero conversions have no meaningful cost per conversion",
+      );
+      assert.equal(
+        campaignMetrics.campaignDaily[2].costPerConversion,
+        null,
+        "missing provider metrics are not calculated or filled with zero",
+      );
       const rows =
         await sql`SELECT source,report_date::text,payload,error FROM reports WHERE store_id=${id}`;
       assert.equal(rows.length, 8);
@@ -434,6 +496,75 @@ test(
         productCalls,
         "old product snapshots remain reusable",
       );
+      const legacy = {
+        ...snapshot,
+        campaigns: campaignMetrics.campaigns.map(
+          ({ costPerConversion, ...campaign }) => campaign,
+        ),
+      };
+      await sql`UPDATE store_product_snapshots SET payload=${sql.json(legacy)} WHERE store_id=${id} AND start_date=${rangeStart}::date AND end_date=${rangeEnd}::date`;
+      const beforeUpgrade = providerCalls;
+      const upgraded = await storeProducts(
+        savedStore,
+        rangeStart,
+        rangeEnd,
+        "USD",
+        "America/Los_Angeles",
+      );
+      assert.equal(upgraded.campaigns[0].costPerConversion, 31.25);
+      assert.equal(upgraded.campaignDaily?.[0].costPerConversion, 31.25);
+      assert.equal(
+        upgraded.catalogError,
+        null,
+        "metric upgrade reuses the catalog",
+      );
+      const afterUpgrade = providerCalls;
+      assert.equal(
+        afterUpgrade - beforeUpgrade,
+        5,
+        "one token exchange plus four Ads queries, no Shopify calls",
+      );
+      await storeProducts(
+        savedStore,
+        rangeStart,
+        rangeEnd,
+        "USD",
+        "America/Los_Angeles",
+      );
+      assert.equal(
+        providerCalls,
+        afterUpgrade,
+        "upgraded snapshots are reused without calls",
+      );
+      await sql`UPDATE store_product_snapshots SET payload=${sql.json(legacy)} WHERE store_id=${id} AND start_date=${rangeStart}::date AND end_date=${rangeEnd}::date`;
+      failAds = true;
+      const failedUpgrade = await storeProducts(
+        savedStore,
+        rangeStart,
+        rangeEnd,
+        "USD",
+        "America/Los_Angeles",
+      );
+      assert.ok(failedUpgrade.adsError);
+      assert.equal(
+        failedUpgrade.campaigns[0].spend,
+        105,
+        "failed upgrade preserves saved data",
+      );
+      const afterFailure = providerCalls;
+      await storeProducts(
+        savedStore,
+        rangeStart,
+        rangeEnd,
+        "USD",
+        "America/Los_Angeles",
+      );
+      assert.equal(
+        providerCalls,
+        afterFailure,
+        "failed metric upgrades do not retry on every read",
+      );
+      failAds = false;
       // More concurrent product reads than pool connections must never deadlock.
       await Promise.all(
         Array.from({ length: 8 }, () =>

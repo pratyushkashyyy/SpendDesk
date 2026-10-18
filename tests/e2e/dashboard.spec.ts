@@ -159,6 +159,7 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
           clicks: 12,
           impressions: 300,
           conversions: 2,
+          costPerConversion: 249.75,
         },
       ],
       campaignDaily: [],
@@ -328,6 +329,7 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
               clicks: 9,
               impressions: 80,
               conversions: 2,
+              costPerConversion: 60.25,
             },
           ],
         },
@@ -356,6 +358,9 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
   await expect(
     inline.getByText("Campaign spend", { exact: false }),
   ).toBeVisible();
+  await expect(inline.locator(".product-stats")).toContainText(
+    "Cost / conversion₹249.75",
+  );
   const policySummary = inline.locator(".inline-policy-summary");
   await expect(policySummary).not.toHaveAttribute("open");
   await inline.screenshot({ path: "outputs/compact-campaigns.png" });
@@ -383,6 +388,16 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
   await expect(daily.getByText("Last 7 days", { exact: true })).toBeVisible();
   await expect(daily.locator("tbody tr")).toHaveCount(7);
   await expect(daily.locator("tbody tr").first()).toContainText("123");
+  await expect(
+    daily.getByRole("columnheader", { name: "Cost / conversion", exact: true }),
+  ).toBeVisible();
+  await expect(
+    daily.locator("tbody tr").first().locator("td").nth(3),
+  ).toHaveText("₹60.25");
+  await expect(
+    daily.locator("tbody tr").nth(1).locator("td").nth(3),
+  ).toHaveText("—");
+  await daily.screenshot({ path: "outputs/campaign-cost-conversion.png" });
   await expect(daily.locator("tbody tr").nth(1)).toContainText("—");
   await daily.getByLabel("Choose report date range").click();
   await page.getByRole("button", { name: "Yesterday", exact: true }).click();

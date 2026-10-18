@@ -60,6 +60,7 @@ export type CampaignDetail = Campaign & {
   clicks: number | null;
   impressions: number | null;
   conversions: number | null;
+  costPerConversion?: number | null;
   budget: number | null;
   budgetPeriod: string;
   sharedBudget: boolean;
@@ -82,6 +83,7 @@ export type CampaignDay = {
   clicks: number | null;
   impressions: number | null;
   conversions: number | null;
+  costPerConversion?: number | null;
 };
 export type StoreProductsData = {
   campaignDaily?: CampaignDay[];

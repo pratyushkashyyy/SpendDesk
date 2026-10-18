@@ -107,6 +107,7 @@ export default function CampaignPerformance({
                   <th>Date</th>
                   <th>Spend</th>
                   <th>Conversions</th>
+                  <th>Cost / conversion</th>
                 </tr>
               </thead>
               <tbody>
@@ -121,6 +122,7 @@ export default function CampaignPerformance({
                           campaign.conversions == null
                             ? null
                             : campaign.conversions / days.length,
+                        costPerConversion: campaign.costPerConversion,
                       }
                     : daily.find((r) => r.date === date);
                   return (
@@ -130,6 +132,12 @@ export default function CampaignPerformance({
                         {formatMoney(row?.spend, data?.currency || currency)}
                       </td>
                       <td>{count(row?.conversions)}</td>
+                      <td>
+                        {formatMoney(
+                          row?.costPerConversion,
+                          data?.currency || currency,
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -137,8 +145,8 @@ export default function CampaignPerformance({
             </table>
           </div>
           <p className="muted">
-            Days without reported figures show —. Conversions include all
-            conversion types.
+            Unavailable figures show —. Cost / conversion is reported by Google
+            Ads for the conversion actions included in its Conversions column.
           </p>
         </>
       )}

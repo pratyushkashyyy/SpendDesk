@@ -24,6 +24,7 @@ function example(store: Store, date: string): StoreProductsData {
     clicks: 42,
     impressions: 2200,
     conversions: 3,
+    costPerConversion: 125,
     budget: store.ads?.budgets.find((b) => b.id === c.budgetId)?.amount || null,
     budgetPeriod: "DAILY",
     sharedBudget: false,
@@ -119,6 +120,10 @@ function CampaignCard({
         </span>
         <span>
           Conversions<strong>{value(c.conversions)}</strong>
+        </span>
+        <span title="Google Ads reported cost per conversion for the selected dates">
+          Cost / conversion
+          <strong>{formatMoney(c.costPerConversion, currency)}</strong>
         </span>
       </div>
       {policyAlerts?.map((alert, index) => (

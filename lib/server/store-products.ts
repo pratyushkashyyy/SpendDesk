@@ -21,9 +21,24 @@ export async function storeProducts(
     const targetCpaMissing = !!data?.campaigns?.some(
       (campaign) => !Object.hasOwn(campaign, "targetCpa"),
     );
-    if (!data || !data.campaignDaily || targetCpaMissing || force) {
+    const conversionCostMissing =
+      !!data &&
+      !data.adsError &&
+      [...data.campaigns, ...(data.campaignDaily || [])].some(
+        (row) => !Object.hasOwn(row, "costPerConversion"),
+      );
+    if (
+      !data ||
+      !data.campaignDaily ||
+      targetCpaMissing ||
+      conversionCostMissing ||
+      force
+    ) {
+      const reuseCatalog =
+        !!data && !!data.campaignDaily && !targetCpaMissing && !force;
       const [catalog, ads] = await Promise.allSettled([
-        fetchCatalog(store),
+        // Upgrading saved Ads metrics does not require another catalog fetch.
+        reuseCatalog ? Promise.resolve(data!.products) : fetchCatalog(store),
         fetchProductAds(store, startDate, endDate, lock, !force),
       ]);
       data = {
@@ -48,7 +63,11 @@ export async function storeProducts(
         timezone,
         links: [],
         catalogError:
-          catalog.status === "rejected" ? catalog.reason.message : null,
+          catalog.status === "rejected"
+            ? catalog.reason.message
+            : reuseCatalog
+              ? data!.catalogError
+              : null,
         adsError: ads.status === "rejected" ? ads.reason.message : null,
         fetchedAt: new Date().toISOString(),
       };

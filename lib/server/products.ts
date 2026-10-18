@@ -102,13 +102,13 @@ export async function fetchProductAds(
     `SELECT ${fields} FROM campaign WHERE campaign.status != REMOVED`,
   );
   const totals = await query(
-    `SELECT campaign.id, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM campaign WHERE ${dateFilter}`,
+    `SELECT campaign.id, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions, metrics.cost_per_conversion FROM campaign WHERE ${dateFilter}`,
   );
   const performance = await query(
     `SELECT campaign.id, segments.product_item_id, segments.product_title, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM shopping_performance_view WHERE ${dateFilter}`,
   );
   const daily = await query(
-    `SELECT campaign.id, segments.date, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM campaign WHERE ${dateFilter} ORDER BY segments.date DESC`,
+    `SELECT campaign.id, segments.date, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions, metrics.cost_per_conversion FROM campaign WHERE ${dateFilter} ORDER BY segments.date DESC`,
   );
   const campaigns: CampaignDetail[] = configured.map((r) => {
     const m = totals.find((t) => t.campaign.id === r.campaign.id)?.metrics;
@@ -134,6 +134,8 @@ export async function fetchProductAds(
       clicks: numberOrNull(m?.clicks),
       impressions: numberOrNull(m?.impressions),
       conversions: numberOrNull(m?.conversions),
+      costPerConversion:
+        Number(m?.conversions) > 0 ? micros(m?.costPerConversion) : null,
     };
   });
   const rows: ProductPerformance[] = performance.map((r) => ({
@@ -155,6 +157,10 @@ export async function fetchProductAds(
       clicks: numberOrNull(r.metrics?.clicks),
       impressions: numberOrNull(r.metrics?.impressions),
       conversions: numberOrNull(r.metrics?.conversions),
+      costPerConversion:
+        Number(r.metrics?.conversions) > 0
+          ? micros(r.metrics?.costPerConversion)
+          : null,
     })),
   };
 }
