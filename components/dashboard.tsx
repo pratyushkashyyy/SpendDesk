@@ -589,6 +589,9 @@ export default function Dashboard({
                     : "Last sync finished"}{" "}
               · {data.sync.synced} source reports fetched · {data.sync.errors}{" "}
               source errors
+              {!!data.sync.detailsSynced && (
+                <> · {data.sync.detailsSynced} campaign/product reports saved</>
+              )}
               {!!data.sync.deferred && (
                 <> · {data.sync.deferred} Ads reports deferred</>
               )}

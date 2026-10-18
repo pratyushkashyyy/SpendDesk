@@ -76,6 +76,7 @@ export type ProductPerformance = {
   impressions: number | null;
   conversions: number | null;
 };
+export type ProductDay = ProductPerformance & { date: string };
 export type CampaignDay = {
   campaignId: string;
   date: string;
@@ -86,6 +87,10 @@ export type CampaignDay = {
   costPerConversion?: number | null;
 };
 export type StoreProductsData = {
+  // True only after every Ads detail query for this range has succeeded.
+  syncComplete?: boolean;
+  productDaily?: ProductDay[];
+  raw?: unknown;
   campaignDaily?: CampaignDay[];
   products: CatalogProduct[];
   campaigns: CampaignDetail[];
@@ -226,6 +231,8 @@ export type DashboardData = {
     startedAt: string;
     finishedAt?: string;
     synced: number;
+    detailsSynced?: number;
+    detailsDeferred?: number;
     errors: number;
     deferred?: number;
     adsPause?: {

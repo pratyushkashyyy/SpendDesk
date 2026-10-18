@@ -9,9 +9,10 @@ import {
   type ScheduleRefresh,
 } from "./mcp-refresh";
 import { validDate } from "../reporting";
+import { savedStoreProducts } from "./store-products";
 
 const instructions =
-  "SpendDesk reports are saved source snapshots, not necessarily live. Always state report dates, source time zones, currencies, checkedAt and errors. Missing data is unavailable, never zero. Never sum different currencies. Budgets are current configuration, not historical spending. Google purchase conversions may be fractional. Do not invent ROAS, profit or blended CPA. Ranges may use complete saved daily coverage in the same currency and time zone. Cost per purchase is unavailable on combined ranges unless refreshed from the provider. For missing or stale reports, offer refresh_data when requested by the owner. Refresh runs in the background: check get_sync_status for the returned requestId, and only claim completion after its state is completed. If errors are nonzero, describe the source failures. Refresh updates store reports; product catalog/performance snapshots still require refreshing the product workspace in the dashboard.";
+  "SpendDesk reports are saved source snapshots, not necessarily live. Always state report dates, source time zones, currencies, checkedAt and errors. Missing data is unavailable, never zero. Never sum different currencies. Budgets are current configuration, not historical spending. Google purchase conversions may be fractional. Do not invent ROAS, profit or blended CPA. Ranges may use complete saved daily coverage in the same currency and time zone. Cost per purchase is unavailable on combined ranges unless refreshed from the provider. For missing or stale reports, offer refresh_data when requested by the owner. Refresh runs in the background: check get_sync_status for the returned requestId, and only claim completion after its state is completed. If errors are nonzero, describe the source failures. Refresh saves store reports, campaigns, daily performance and product performance. Product/campaign reads use saved data only.";
 export function cleanPayload(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(cleanPayload);
   if (value && typeof value === "object")
@@ -115,7 +116,7 @@ export function createMcpServer(
     "get_product_performance",
     {
       description:
-        "Read saved Shopify catalog and Google product/campaign performance for one store and exact date range. Returns bounded pages of products, campaigns, product performance and daily campaign data. Missing snapshots require preparation in the dashboard.",
+        "Read saved Shopify catalog and Google product/campaign performance for one store and date range, including subsets of synced daily data. Returns bounded pages. Missing data requires sync; this read never calls providers.",
       inputSchema: {
         store_id: z.string().uuid(),
         from: date,
@@ -128,22 +129,27 @@ export function createMcpServer(
     },
     async ({ store_id, from, to, offset, limit }) => {
       validateRange(from, to);
-      const [snapshot] =
-        await db()`SELECT payload,checked_at FROM store_product_snapshots WHERE store_id=${store_id}::uuid AND start_date=${from}::date AND end_date=${to}::date`;
-      if (!snapshot)
+      const p = await savedStoreProducts(store_id, from, to);
+      if (!p)
         return result({
           available: false,
           store_id,
           from,
           to,
           message:
-            "This exact range has no saved product snapshot. Open the store in the dashboard for these dates to prepare it.",
+            "These dates have no complete saved campaign/product report. Run sync for these dates to save it.",
         });
-      const p = snapshot.payload;
+      const links =
+        await db()`SELECT product_id AS "productId",campaign_id AS "campaignId" FROM product_campaign_links WHERE store_id=${store_id}`;
+      const collections = { ...p, links };
       const lists = Object.fromEntries(
         ["products", "campaigns", "performance", "campaignDaily", "links"].map(
           (key) => {
-            const items = Array.isArray(p[key]) ? p[key] : [];
+            const items = Array.isArray(
+              collections[key as keyof typeof collections],
+            )
+              ? (collections[key as keyof typeof collections] as unknown[])
+              : [];
             return [
               key,
               {
@@ -161,8 +167,8 @@ export function createMcpServer(
         store_id,
         from,
         to,
-        checkedAt: snapshot.checked_at,
-        stale: Date.now() - new Date(snapshot.checked_at).getTime() > 3600000,
+        checkedAt: p.fetchedAt,
+        stale: Date.now() - new Date(p.fetchedAt).getTime() > 3600000,
         currency: p.currency,
         timezone: p.timezone,
         catalogError: p.catalogError,

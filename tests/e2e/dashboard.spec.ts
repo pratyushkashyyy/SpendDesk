@@ -127,6 +127,7 @@ test("local owner setup, persisted mapping, source reports, examples, and mobile
   const productId = "gid://shopify/Product/9001";
   await sql`INSERT INTO store_product_snapshots(store_id,start_date,end_date,payload) VALUES(${store.id},${yesterday},${yesterday},${sql.json(
     {
+      syncComplete: true,
       products: [
         {
           id: productId,

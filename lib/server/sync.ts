@@ -5,6 +5,8 @@ import { savedReports } from "./report-cache";
 import { reportDates } from "../report-ranges";
 import { dateInZone } from "../reporting";
 import { GoogleQuotaPause, googleQuotaScope } from "./google-quota";
+import { refreshStoreProducts, savedStoreProducts } from "./store-products";
+import { parseBudgetEvents } from "./budget-history";
 export type SyncStatus = {
   running: boolean;
   startedAt: string;
@@ -12,6 +14,8 @@ export type SyncStatus = {
   synced: number;
   errors: number;
   deferred?: number;
+  detailsSynced?: number;
+  detailsDeferred?: number;
   adsPause?: {
     reason: "background" | "exhausted" | "cooldown";
     message: string;
@@ -35,6 +39,8 @@ export async function syncReports(
     synced: 0,
     errors: 0,
     deferred: 0,
+    detailsSynced: 0,
+    detailsDeferred: 0,
     date:
       customDate && endDate && customDate !== endDate
         ? `${customDate} – ${endDate}`
@@ -63,9 +69,20 @@ export async function syncReports(
         connection,
       );
       for (const row of saved) existing.add(`${row.store_id}:${row.source}`);
+      for (const store of stores) {
+        const details = await savedStoreProducts(
+          store.id,
+          customDate,
+          endDate || customDate,
+          connection,
+        );
+        if (details?.syncComplete && !details.adsError && !details.catalogError)
+          existing.add(`${store.id}:details`);
+      }
       stores = stores.filter(
         (store) =>
           !existing.has(`${store.id}:ads`) ||
+          !existing.has(`${store.id}:details`) ||
           (store.shop_cipher && !existing.has(`${store.id}:shop`)),
       );
     }
@@ -76,7 +93,12 @@ export async function syncReports(
     const pausedScopes = new Map<string, GoogleQuotaPause>();
     for (const group of new Set(
       stores
-        .filter((s) => !missingOnly || !existing.has(`${s.id}:ads`))
+        .filter(
+          (s) =>
+            !missingOnly ||
+            !existing.has(`${s.id}:ads`) ||
+            !existing.has(`${s.id}:details`),
+        )
         .map((s) => s.group_id as number),
     ))
       try {
@@ -171,6 +193,14 @@ export async function syncReports(
               await connection`INSERT INTO report_ranges(store_id,source,start_date,end_date,payload,error) VALUES(${store.id},${source},${fetchFrom},${fetchTo},${connection.json(data as any)},NULL) ON CONFLICT(store_id,source,start_date,end_date) DO UPDATE SET payload=EXCLUDED.payload,error=NULL,checked_at=now()`;
             else
               await connection`INSERT INTO reports(store_id,source,report_date,payload,error) VALUES(${store.id},${source},${reportDate},${connection.json(data as any)},NULL) ON CONFLICT(store_id,source,report_date) DO UPDATE SET payload=EXCLUDED.payload,error=NULL,checked_at=now()`;
+            if (source === "ads") {
+              const raw = data.raw as any;
+              for (const event of parseBudgetEvents(raw?.changes || []))
+                await connection`INSERT INTO google_budget_events(store_id,event_id,budget_id,previous_amount,amount,changed_at,currency,timezone)
+                  VALUES(${store.id},${event.id},${event.budgetId},${event.previous},${event.amount},${event.changedAt},${data.currency},${data.timezone}) ON CONFLICT DO NOTHING`;
+              if (raw?.campaignActivity?.complete)
+                await connection`UPDATE budget_states SET history_checked_at=now(),history_error=NULL,history_next_at=now()+INTERVAL '24 hours' WHERE store_id=${store.id}`;
+            }
             status.synced += recentDays || 1;
           } catch (e) {
             if (source === "ads" && e instanceof GoogleQuotaPause) {
@@ -209,12 +239,66 @@ export async function syncReports(
           await putSetting("sync_status", JSON.stringify(status), connection);
         }
       }
+      if (!missingOnly || !existing.has(`${store.id}:details`)) {
+        try {
+          const token = tokens.get(store.group_id);
+          if (token instanceof Error) throw token;
+          if (!token) throw new Error("Google authorization is unavailable.");
+          const pause = pausedScopes.get(
+            googleQuotaScope(token.config.clientId),
+          );
+          if (pause) throw pause;
+          const [latest] =
+            await connection`SELECT payload FROM reports WHERE store_id=${store.id} AND source='ads' AND payload IS NOT NULL ORDER BY checked_at DESC LIMIT 1`;
+          const timezone = latest?.payload?.timezone || "Asia/Kolkata";
+          const details = await refreshStoreProducts(
+            store,
+            customDate || dateInZone(timezone, -3),
+            endDate || customDate || dateInZone(timezone),
+            latest?.payload?.currency || "",
+            timezone,
+            connection,
+            background,
+            token,
+          );
+          if (details.syncComplete)
+            status.detailsSynced = (status.detailsSynced || 0) + 1;
+          if (details.adsError || details.catalogError) status.errors++;
+        } catch (error) {
+          if (error instanceof GoogleQuotaPause) {
+            status.deferred = (status.deferred || 0) + 1;
+            status.detailsDeferred = (status.detailsDeferred || 0) + 1;
+            status.adsPause = {
+              reason: error.reason,
+              message: error.message,
+              resumeAt: error.resumeAt,
+            };
+            const token = tokens.get(store.group_id);
+            if (token && !(token instanceof Error))
+              pausedScopes.set(googleQuotaScope(token.config.clientId), error);
+          } else {
+            status.errors++;
+            console.error(
+              JSON.stringify({
+                event: "campaign_detail_sync_failed",
+                message:
+                  error instanceof Error
+                    ? error.message
+                    : "Campaign detail sync failed.",
+              }),
+            );
+          }
+        }
+        await putSetting("sync_status", JSON.stringify(status), connection);
+      }
     }
     return {
       busy: false,
       synced: status.synced,
       errors: status.errors,
       deferred: status.deferred || 0,
+      detailsSynced: status.detailsSynced || 0,
+      detailsDeferred: status.detailsDeferred || 0,
       adsPause: status.adsPause,
     };
   } catch (error) {

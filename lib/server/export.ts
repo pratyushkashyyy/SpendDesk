@@ -86,6 +86,14 @@ export async function buildExport(from: string, to: string) {
       );
       productData.push(...batch);
     }
+    if (productData.some((data) => data.syncComplete === false))
+      return Response.json(
+        {
+          error:
+            "Campaign and product reports for these dates are not fully synced yet. Run sync, then export again.",
+        },
+        { status: 409 },
+      );
     const rows: Row[] = [];
     for (const connection of connections) {
       const row = blank();

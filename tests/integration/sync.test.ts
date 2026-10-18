@@ -72,9 +72,16 @@ await sql.unsafe(
     "utf8",
   ),
 );
+for (const name of ["009_budget_history", "010_campaign_activity"])
+  await sql.unsafe(
+    await readFile(
+      new URL(`../../db/migrations/${name}.sql`, import.meta.url),
+      "utf8",
+    ),
+  );
 await sql`UPDATE google_ads_quota_policy SET spacing_ms=0`;
 await sql`TRUNCATE google_ads_operations,google_ads_quota_state`;
-await sql`TRUNCATE report_observations,export_jobs, product_campaign_links,store_product_snapshots,report_ranges,reports,stores,google_connections,settings,oauth_states,auth_attempts`;
+await sql`TRUNCATE google_budget_events,budget_observed_changes,budget_states,report_observations,export_jobs, product_campaign_links,store_product_snapshots,report_ranges,reports,stores,google_connections,settings,oauth_states,auth_attempts`;
 
 test(
   "real PostgreSQL sync stores provider values, preserves snapshots on failures, and prevents overlapping jobs",
@@ -82,6 +89,7 @@ test(
   async () => {
     const id = randomUUID(),
       original = globalThis.fetch;
+    const budgetChangeMicros = String(BigInt(Date.now()) * BigInt(1000));
     let failAds = false;
     let providerCalls = 0;
     let adsCalls = 0;
@@ -156,6 +164,25 @@ test(
             },
             { status: 400 },
           );
+        if (q.includes("FROM change_event"))
+          return Response.json({
+            results: [
+              {
+                changeEvent: {
+                  resourceName: `customers/1234567890/changeEvents/${budgetChangeMicros}~1~1`,
+                  changeResourceName: "customers/1234567890/campaignBudgets/99",
+                  resourceChangeOperation: "UPDATE",
+                  changedFields: "amount_micros",
+                  oldResource: {
+                    campaignBudget: { amountMicros: "200000000" },
+                  },
+                  newResource: {
+                    campaignBudget: { amountMicros: "250000000" },
+                  },
+                },
+              },
+            ],
+          });
         if (q.startsWith("SELECT segments.date,")) {
           const [, from, to] = q.match(/BETWEEN '([^']+)' AND '([^']+)'/) || [];
           return Response.json({
@@ -203,30 +230,49 @@ test(
             conversions: 3.5,
             costPerConversion: "31250000",
           };
+          const between = q.match(/BETWEEN '([^']+)' AND '([^']+)'/);
+          const single = q.match(/segments.date = '([^']+)'/);
+          const dates = between
+            ? reportDates(between[1], between[2]).reverse()
+            : [single![1]];
           return Response.json({
             results: q.includes("segments.date,")
-              ? [
-                  {
-                    campaign: { id: "1" },
-                    segments: { date: "2026-09-17" },
-                    metrics,
-                  },
-                  {
-                    campaign: { id: "1" },
-                    segments: { date: "2026-09-16" },
-                    metrics: { conversions: 0, costPerConversion: 0 },
-                  },
-                  {
-                    campaign: { id: "1" },
-                    segments: { date: "2026-09-15" },
-                    metrics: { conversions: 2 },
-                  },
-                ]
+              ? dates.map((date, index) => ({
+                  campaign: { id: "1" },
+                  segments: { date },
+                  metrics:
+                    index === 1
+                      ? { conversions: 0, costPerConversion: 0 }
+                      : index === 2
+                        ? { conversions: 2 }
+                        : metrics,
+                }))
               : [{ campaign: { id: "1" }, metrics }],
           });
         }
-        if (q.includes("FROM shopping_performance_view"))
-          return Response.json({ results: [] });
+        if (q.includes("FROM shopping_performance_view")) {
+          const between = q.match(/BETWEEN '([^']+)' AND '([^']+)'/);
+          const single = q.match(/segments.date = '([^']+)'/);
+          const dates = between
+            ? reportDates(between[1], between[2])
+            : [single![1]];
+          return Response.json({
+            results: dates.map((date) => ({
+              campaign: { id: "1" },
+              segments: {
+                date,
+                productItemId: "SKU-1",
+                productTitle: "Fixture product",
+              },
+              metrics: {
+                costMicros: "2000000",
+                clicks: 2,
+                impressions: 10,
+                conversions: 0.5,
+              },
+            })),
+          });
+        }
         if (q.includes("cost_per_conversion"))
           return Response.json({
             results: [
@@ -247,6 +293,7 @@ test(
                 id: "1",
                 name: "Fixture shopping",
                 status: "ENABLED",
+                advertisingChannelType: "SHOPPING",
                 startDateTime: "2026-01-01 00:00:00",
               },
               campaignBudget: {
@@ -268,6 +315,9 @@ test(
             currencyCode: "INR",
             ianaTimezone: "Asia/Kolkata",
           },
+          ...(body.query.includes("query StoreProducts")
+            ? { products: { nodes: [], pageInfo: { hasNextPage: false } } }
+            : {}),
           ...(body.query.includes("shopifyqlQuery")
             ? {
                 shopifyqlQuery: {
@@ -298,10 +348,15 @@ test(
       assert.equal(first.synced, 8);
       assert.equal(
         adsCalls,
-        11,
-        "four recent Ads days and campaign pause history are fetched in eleven queries",
+        15,
+        "hourly sync includes store reports and full campaign/product details in fifteen queries",
       );
       assert.equal(first.errors, 0);
+      assert.equal(first.detailsSynced, 1);
+      const [savedChange] =
+        await sql`SELECT previous_amount,amount FROM google_budget_events WHERE store_id=${id}`;
+      assert.equal(Number(savedChange.previous_amount), 200);
+      assert.equal(Number(savedChange.amount), 250);
       const beforeProductAds = adsCalls;
       const campaignMetrics = await fetchProductAds(
         { cid: "1234567890", manager_cid: "", group_id: 3 },
@@ -468,6 +523,7 @@ test(
         105,
       );
       const snapshot = {
+        syncComplete: true,
         products: [],
         campaigns: [],
         performance: [],
@@ -480,7 +536,8 @@ test(
         adsError: null,
         fetchedAt: "2020-01-01T00:00:00Z",
       };
-      await sql`INSERT INTO store_product_snapshots(store_id,start_date,end_date,payload,checked_at) VALUES(${id},${rangeStart},${rangeEnd},${sql.json(snapshot)},'2020-01-01')`;
+      await sql`DELETE FROM store_product_snapshots WHERE store_id=${id} AND start_date=end_date AND start_date BETWEEN ${rangeStart}::date AND ${rangeEnd}::date`;
+      await sql`INSERT INTO store_product_snapshots(store_id,start_date,end_date,payload,checked_at) VALUES(${id},${rangeStart},${rangeEnd},${sql.json(snapshot)},'2020-01-01') ON CONFLICT(store_id,start_date,end_date) DO UPDATE SET payload=EXCLUDED.payload,checked_at=EXCLUDED.checked_at`;
       const [savedStore] = await sql`SELECT * FROM stores WHERE id=${id}`;
       const productCalls = providerCalls;
       const cachedProducts = await storeProducts(
@@ -496,61 +553,108 @@ test(
         productCalls,
         "old product snapshots remain reusable",
       );
-      const legacy = {
-        ...snapshot,
-        campaigns: campaignMetrics.campaigns.map(
-          ({ costPerConversion, ...campaign }) => campaign,
-        ),
-      };
-      await sql`UPDATE store_product_snapshots SET payload=${sql.json(legacy)} WHERE store_id=${id} AND start_date=${rangeStart}::date AND end_date=${rangeEnd}::date`;
-      const beforeUpgrade = providerCalls;
-      const upgraded = await storeProducts(
+      const unsaved = await storeProducts(
         savedStore,
-        rangeStart,
-        rangeEnd,
+        "2025-01-01",
+        "2025-01-07",
         "USD",
         "America/Los_Angeles",
       );
-      assert.equal(upgraded.campaigns[0].costPerConversion, 31.25);
-      assert.equal(upgraded.campaignDaily?.[0].costPerConversion, 31.25);
-      assert.equal(
-        upgraded.catalogError,
-        null,
-        "metric upgrade reuses the catalog",
-      );
-      const afterUpgrade = providerCalls;
-      assert.equal(
-        afterUpgrade - beforeUpgrade,
-        5,
-        "one token exchange plus four Ads queries, no Shopify calls",
-      );
-      await storeProducts(
-        savedStore,
-        rangeStart,
-        rangeEnd,
-        "USD",
-        "America/Los_Angeles",
-      );
+      assert.equal(unsaved.syncComplete, false);
+      assert.ok(unsaved.adsError);
       assert.equal(
         providerCalls,
-        afterUpgrade,
-        "upgraded snapshots are reused without calls",
+        productCalls,
+        "even missing campaign reads never call providers",
       );
-      await sql`UPDATE store_product_snapshots SET payload=${sql.json(legacy)} WHERE store_id=${id} AND start_date=${rangeStart}::date AND end_date=${rangeEnd}::date`;
-      failAds = true;
-      const failedUpgrade = await storeProducts(
+      const refreshed = await storeProducts(
         savedStore,
         rangeStart,
         rangeEnd,
         "USD",
         "America/Los_Angeles",
+        true,
       );
-      assert.ok(failedUpgrade.adsError);
+      assert.equal(refreshed.syncComplete, true);
+      assert.equal(refreshed.campaigns[0].costPerConversion, 31.25);
+      const afterRefresh = providerCalls;
+      const detailSubset = await storeProducts(
+        savedStore,
+        "2026-09-10",
+        "2026-09-14",
+        "USD",
+        "America/Los_Angeles",
+      );
+      assert.equal(detailSubset.syncComplete, true);
+      assert.equal(detailSubset.performance[0].spend, 10);
+      assert.equal(detailSubset.performance[0].conversions, 2.5);
       assert.equal(
-        failedUpgrade.campaigns[0].spend,
-        105,
-        "failed upgrade preserves saved data",
+        providerCalls,
+        afterRefresh,
+        "subranges use saved daily campaign/product data",
       );
+      const fixtureFetch = globalThis.fetch;
+      let releaseProvider!: () => void;
+      let providerEntered!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        providerEntered = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        releaseProvider = resolve;
+      });
+      globalThis.fetch = async (input, init) => {
+        if (
+          String(input).includes("googleads.googleapis.com") &&
+          String(init?.body).includes("cost_per_conversion")
+        ) {
+          providerEntered();
+          await gate;
+        }
+        return fixtureFetch(input, init);
+      };
+      const refreshing = storeProducts(
+        savedStore,
+        rangeStart,
+        rangeEnd,
+        "USD",
+        "America/Los_Angeles",
+        true,
+      );
+      try {
+        await entered;
+        const visibleDuringSync = await Promise.race([
+          storeProducts(
+            savedStore,
+            rangeStart,
+            rangeEnd,
+            "USD",
+            "America/Los_Angeles",
+          ),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () =>
+                reject(new Error("Database read blocked on provider refresh")),
+              1000,
+            ),
+          ),
+        ]);
+        assert.equal(visibleDuringSync.campaigns[0].spend, 105);
+      } finally {
+        releaseProvider();
+        await refreshing;
+        globalThis.fetch = fixtureFetch;
+      }
+      failAds = true;
+      const failedRefresh = await storeProducts(
+        savedStore,
+        rangeStart,
+        rangeEnd,
+        "USD",
+        "America/Los_Angeles",
+        true,
+      );
+      assert.ok(failedRefresh.adsError);
+      assert.equal(failedRefresh.campaigns[0].spend, 105);
       const afterFailure = providerCalls;
       await storeProducts(
         savedStore,
@@ -562,9 +666,17 @@ test(
       assert.equal(
         providerCalls,
         afterFailure,
-        "failed metric upgrades do not retry on every read",
+        "failed refreshes do not trigger provider calls when viewing",
       );
       failAds = false;
+      await storeProducts(
+        savedStore,
+        rangeStart,
+        rangeEnd,
+        "USD",
+        "America/Los_Angeles",
+        true,
+      );
       // More concurrent product reads than pool connections must never deadlock.
       await Promise.all(
         Array.from({ length: 8 }, () =>
@@ -639,7 +751,7 @@ test(
       }
       failAds = true;
       const second = await syncReports();
-      assert.equal(second.errors, 4);
+      assert.equal(second.errors, 5);
       assert.equal(second.synced, 4);
       const [preserved] =
         await sql`SELECT payload,error,checked_at FROM reports WHERE store_id=${id} AND source='ads' AND report_date=${dateInZone("America/Los_Angeles")}`;
@@ -647,7 +759,7 @@ test(
       assert.ok(preserved.error);
       const status = JSON.parse((await getSetting("sync_status"))!);
       assert.equal(status.running, false);
-      assert.equal(status.errors, 4);
+      assert.equal(status.errors, 5);
       assert.ok(status.finishedAt);
       // Reaching the shared background threshold cannot contact Google or
       // replace saved Ads metrics with empty/zero data; Shopify keeps syncing.
@@ -664,7 +776,8 @@ test(
         true,
       );
       assert.equal(paused.errors, 0);
-      assert.equal(paused.deferred, 4);
+      assert.equal(paused.deferred, 5);
+      assert.equal(paused.detailsDeferred, 1);
       assert.equal(
         paused.synced,
         4,
@@ -691,7 +804,7 @@ test(
         "skipping a provider must not make its snapshot look fresher",
       );
       const pausedStatus = JSON.parse((await getSetting("sync_status"))!);
-      assert.equal(pausedStatus.deferred, 4);
+      assert.equal(pausedStatus.deferred, 5);
       assert.equal(pausedStatus.errors, 0);
       assert.equal(pausedStatus.running, false);
       const manual = await syncReports();
@@ -700,7 +813,7 @@ test(
         0,
         "manual sync can use the reserved allowance",
       );
-      assert.equal(adsCalls - beforePause, 11);
+      assert.equal(adsCalls - beforePause, 15);
       const quotaMessage =
         "Google API background sync paused at 80% of the rolling daily budget. Saved reports remain available; manual refreshes can use the reserved allowance.";
       const reportDay = dateInZone("America/Los_Angeles");
@@ -736,7 +849,7 @@ test(
       assert.ok(!cipher.token_cipher.includes("qa-refresh"));
     } finally {
       globalThis.fetch = original;
-      await sql`TRUNCATE report_observations,export_jobs,product_campaign_links,store_product_snapshots,report_ranges,reports,stores,google_connections,settings,oauth_states,auth_attempts`;
+      await sql`TRUNCATE google_budget_events,budget_observed_changes,budget_states,report_observations,export_jobs,product_campaign_links,store_product_snapshots,report_ranges,reports,stores,google_connections,settings,oauth_states,auth_attempts`;
       await sql`TRUNCATE google_ads_operations,google_ads_quota_state`;
       await sql.end();
     }

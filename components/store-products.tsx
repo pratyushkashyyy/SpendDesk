@@ -630,8 +630,10 @@ export default function StoreProducts({
             </>
           )}
           <small className="products-checked">
-            Checked {new Date(data.fetchedAt).toLocaleString()} · Reports are
-            cached for one hour.
+            {data.fetchedAt
+              ? `Saved ${new Date(data.fetchedAt).toLocaleString()} · `
+              : ""}
+            Loaded from saved reports. Sync refreshes campaigns and products.
           </small>
         </>
       )}

@@ -187,7 +187,11 @@ export async function fetchAds(
     activityError: string | undefined;
   try {
     changes = await query(
-      campaignChangesQuery(dateInZone(timezone, -29), dateInZone(timezone, 1)),
+      campaignChangesQuery(
+        dateInZone(timezone, -29),
+        dateInZone(timezone, 1),
+        true,
+      ),
     );
   } catch (error) {
     // History enrichment must not discard successful spend/order reports.
@@ -285,6 +289,7 @@ export async function fetchAds(
       categories,
       campaigns,
       configured,
+      changes,
       campaignActivity: activity,
     },
   };

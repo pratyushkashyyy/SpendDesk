@@ -1,6 +1,5 @@
 import { buildBudgetHistory } from "@/lib/budget-history";
 import { activeBudget } from "@/lib/campaign-activity";
-import { refreshBudgetHistory } from "@/lib/server/budget-history";
 import { buildStoreLive } from "@/lib/store-live";
 import { googleConfig } from "@/lib/server/google";
 import { googleQuotaScope, googleQuotaStatus } from "@/lib/server/google-quota";
@@ -177,14 +176,6 @@ export async function GET(request: Request) {
           }
         });
     }
-    after(async () => {
-      if (process.env.STOREDESK_BROWSER_TEST === "true") return;
-      try {
-        await refreshBudgetHistory();
-      } catch {
-        console.error("Budget history preparation failed.");
-      }
-    });
     const storedSync = JSON.parse((await getSetting("sync_status")) || "null");
     if (storedSync?.running) {
       const [lock] =

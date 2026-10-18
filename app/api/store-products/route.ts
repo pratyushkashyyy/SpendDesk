@@ -8,12 +8,12 @@ async function context(id: string, startDate?: string, endDate?: string) {
   const [store] = await db()`SELECT * FROM stores WHERE id=${id}`;
   if (!store) return null;
   const [report] =
-    await db()`SELECT payload FROM reports WHERE store_id=${id} AND source='ads' AND payload IS NOT NULL ORDER BY checked_at DESC LIMIT 1`;
-  const timezone = report?.payload?.timezone || "Asia/Kolkata";
+    await db()`SELECT payload->>'timezone' AS timezone,payload->>'currency' AS currency FROM reports WHERE store_id=${id} AND source='ads' AND payload IS NOT NULL ORDER BY checked_at DESC LIMIT 1`;
+  const timezone = report?.timezone || "Asia/Kolkata";
   return {
     store,
     timezone,
-    currency: report?.payload?.currency || "",
+    currency: report?.currency || "",
     startDate: startDate || dateInZone(timezone, -1),
     endDate: endDate || startDate || dateInZone(timezone, -1),
   };
@@ -29,7 +29,10 @@ export async function GET(request: Request) {
     !idSchema.safeParse(id).success ||
     (startDate && !validDate(startDate)) ||
     (endDate && !validDate(endDate)) ||
-    (startDate && endDate && startDate > endDate)
+    (startDate &&
+      endDate &&
+      (startDate > endDate ||
+        (Date.parse(endDate) - Date.parse(startDate)) / 86400000 > 365))
   )
     return Response.json(
       { error: "Choose a valid store and report date." },
@@ -72,7 +75,10 @@ export async function POST(request: Request) {
   if (denied) return denied;
   try {
     const input = inputSchema.parse(await request.json());
-    if (input.from > input.to)
+    if (
+      input.from > input.to ||
+      (Date.parse(input.to) - Date.parse(input.from)) / 86400000 > 365
+    )
       return Response.json(
         { error: "Choose a valid date range." },
         { status: 400 },

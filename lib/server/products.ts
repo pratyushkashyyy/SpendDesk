@@ -1,13 +1,10 @@
 import { db } from "./db";
 import { decrypt } from "./crypto";
-import { adsQuery, googleAccess } from "./google";
+import { adsQuery, googleAccess, type AdsAuth } from "./google";
 import { shopAccess, shopGraphql, type ShopCredentials } from "./shopify";
 import { micros, numberOrNull } from "../reporting";
-import type {
-  CatalogProduct,
-  CampaignDetail,
-  ProductPerformance,
-} from "../types";
+import type { CatalogProduct, CampaignDetail, ProductDay } from "../types";
+import { aggregateProductPerformance } from "../product-report-ranges";
 export const CATALOG_QUERY = `query StoreProducts($after: String) {
   products(first: 20, after: $after) {
     nodes { id title handle status
@@ -87,8 +84,10 @@ export async function fetchProductAds(
   endDate = startDate,
   sql = db(),
   background = true,
+  suppliedAuth?: AdsAuth,
 ) {
-  const auth = await googleAccess(store.group_id, sql, background);
+  const auth =
+    suppliedAuth || (await googleAccess(store.group_id, sql, background));
   const query = (q: string) => adsQuery(store.cid, store.manager_cid, auth, q);
   const fields =
     "campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign.bidding_strategy_type, campaign.target_cpa.target_cpa_micros, campaign.maximize_conversions.target_cpa_micros, bidding_strategy.target_cpa.target_cpa_micros, campaign_budget.id, campaign_budget.amount_micros, campaign_budget.period, campaign_budget.explicitly_shared";
@@ -98,14 +97,12 @@ export async function fetchProductAds(
       : `segments.date BETWEEN '${startDate}' AND '${endDate}'`;
   // Keep the reserved SQL connection alive until every query finishes;
   // stop immediately on quota pauses instead of leaving queued siblings running.
-  const configured = await query(
-    `SELECT ${fields} FROM campaign WHERE campaign.status != REMOVED`,
-  );
+  const configured = await query(`SELECT ${fields} FROM campaign`);
   const totals = await query(
     `SELECT campaign.id, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions, metrics.cost_per_conversion FROM campaign WHERE ${dateFilter}`,
   );
   const performance = await query(
-    `SELECT campaign.id, segments.product_item_id, segments.product_title, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM shopping_performance_view WHERE ${dateFilter}`,
+    `SELECT campaign.id, segments.date, segments.product_item_id, segments.product_title, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM shopping_performance_view WHERE ${dateFilter}`,
   );
   const daily = await query(
     `SELECT campaign.id, segments.date, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions, metrics.cost_per_conversion FROM campaign WHERE ${dateFilter} ORDER BY segments.date DESC`,
@@ -116,7 +113,7 @@ export async function fetchProductAds(
       id: r.campaign.id,
       name: r.campaign.name,
       status: r.campaign.status,
-      channel: r.campaign.advertisingChannelType,
+      channel: r.campaign.advertisingChannelType || "UNKNOWN",
       budgetId: r.campaignBudget?.id || "",
       budget:
         r.campaignBudget?.period === "DAILY"
@@ -138,7 +135,17 @@ export async function fetchProductAds(
         Number(m?.conversions) > 0 ? micros(m?.costPerConversion) : null,
     };
   });
-  const rows: ProductPerformance[] = performance.map((r) => ({
+  if (
+    [...performance, ...daily].some(
+      (r) =>
+        !r.segments?.date ||
+        r.segments.date < startDate ||
+        r.segments.date > endDate,
+    )
+  )
+    throw new Error("Google did not return valid dated campaign/product rows.");
+  const rows: ProductDay[] = performance.map((r) => ({
+    date: r.segments.date,
     itemId: r.segments.productItemId,
     title: r.segments.productTitle || r.segments.productItemId,
     campaignId: r.campaign.id,
@@ -149,7 +156,9 @@ export async function fetchProductAds(
   }));
   return {
     campaigns,
-    performance: rows,
+    performance: aggregateProductPerformance(rows),
+    productDaily: rows,
+    raw: { configured, totals, performance, daily },
     campaignDaily: daily.map((r) => ({
       campaignId: r.campaign.id,
       date: r.segments.date,
