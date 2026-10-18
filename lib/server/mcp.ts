@@ -213,7 +213,7 @@ export function createMcpServer(
     {
       title: "Refresh dashboard reports",
       description:
-        "Request fresh Google Ads and Shopify order reports for all connected stores. Omit dates for today and the preceding three days in each source account time zone, or provide both from and to for an exact inclusive range of at most 366 days. Runs in the background and returns a requestId; use get_sync_status until that request is completed, then get_store_reports. Uses provider API quota and updates saved report snapshots. Does not change campaigns/budgets/settings or refresh product workspace snapshots. Only use when the owner asks to refresh.",
+        "Sync store reports, campaign configuration, daily campaign and product performance, budget change history, and Shopify catalog/orders for all connected stores. Omit dates for today and the preceding three days in each source account time zone, or provide both from and to for an exact inclusive range of at most 366 days. Saves exact totals and daily records for reuse by smaller ranges. Runs in the background and returns a requestId; use get_sync_status until that request is completed, then read saved reports. Uses provider API quota. Does not change campaigns or budgets. Only use when the owner asks to refresh.",
       inputSchema: { from: date.optional(), to: date.optional() },
       annotations: {
         readOnlyHint: false,
