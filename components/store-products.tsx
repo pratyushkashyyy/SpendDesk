@@ -79,6 +79,24 @@ function CampaignCard({
   showPolicyAlerts?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const history = store.budgetHistory;
+  const lastBudgetChange =
+    history?.currency === currency
+      ? history.changes
+          .filter(
+            (change) =>
+              change.source === "google" && change.budgetId === c.budgetId,
+          )
+          .reduce<(typeof history.changes)[number] | undefined>(
+            (latest, change) =>
+              !latest ||
+              Date.parse(change.changedAt) > Date.parse(latest.changedAt)
+                ? change
+                : latest,
+            undefined,
+          )
+      : undefined;
+  const budgetTimezone = history?.timezone || store.ads?.timezone || "UTC";
   const policyAlerts = showPolicyAlerts
     ? store.ads?.alerts?.filter((alert) => alert.campaignId === c.id)
     : [];
@@ -109,6 +127,31 @@ function CampaignCard({
               ? formatMoney(c.budget, currency)
               : c.budgetPeriod || "—"}
           </strong>
+          <small className="campaign-budget-change">
+            {lastBudgetChange ? (
+              <>
+                Last change: {formatMoney(lastBudgetChange.previous, currency)}{" "}
+                → {formatMoney(lastBudgetChange.amount, currency)}
+                <br />
+                <time dateTime={lastBudgetChange.changedAt}>
+                  {new Date(lastBudgetChange.changedAt).toLocaleString(
+                    "en-IN",
+                    {
+                      timeZone: budgetTimezone,
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    },
+                  )}
+                </time>{" "}
+                · {budgetTimezone}
+              </>
+            ) : (
+              "No previous budget change recorded"
+            )}
+          </small>
         </span>
         <span>
           Target CPA
